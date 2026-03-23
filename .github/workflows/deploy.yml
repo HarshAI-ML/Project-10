@@ -1,0 +1,63 @@
+name: Deploy auto_invest_AI to Azure VM
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Copy files to VM via SCP
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "."
+          target: ${{ secrets.SERVER_PATH }}
+          rm: false
+
+      - name: Run deployment commands on VM
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+
+            echo "=== Write backend .env ==="
+            cat > /home/azureuser/auto-invest-ai/backend/.env << 'ENVEOF'
+            DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}"
+            DJANGO_DEBUG="False"
+            DJANGO_ALLOWED_HOSTS="98.70.29.114 autoinvestapi.duckdns.org autoinvest.duckdns.org localhost 127.0.0.1"
+            CORS_ALLOWED_ORIGINS="http://autoinvest.duckdns.org http://autoinvestapi.duckdns.org http://98.70.29.114 http://localhost:5173"
+            CORS_ALLOW_ALL_ORIGINS="True"
+            ENVEOF
+
+            echo "=== Backend: install deps + migrate ==="
+            cd /home/azureuser/auto-invest-ai/backend
+            venv/bin/pip install -r requirements-prod.txt --quiet
+            venv/bin/python manage.py migrate --noinput
+            venv/bin/python manage.py collectstatic --noinput
+
+            echo "=== Frontend: write .env + build ==="
+            cd /home/azureuser/auto-invest-ai/frontend
+            echo "VITE_API_BASE_URL=http://autoinvestapi.duckdns.org/api/" > .env
+            npm install --silent
+            npm run build
+
+            echo "=== Restart app ==="
+            pm2 restart autoinvest || pm2 start /home/azureuser/auto-invest-ai/deploy/rungunicorn.sh --name autoinvest
+            pm2 save
+            sudo systemctl restart nginx
+
+            echo "✅ Deployment complete!"

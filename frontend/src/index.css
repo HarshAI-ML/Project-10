@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  min-height: 100vh;
+}
+
+.card {
+  @apply rounded-xl bg-white border border-slate-100 shadow-sm transition-shadow duration-200;
+}
+
+.input {
+  @apply w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100;
+}
+
+/* Used by PricePrediction form controls */
+.pp-input {
+  @apply w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 transition focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100;
+}
+
+.btn-primary {
+  @apply rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 active:scale-[0.98] disabled:opacity-50;
+}
+
+.btn-secondary {
+  @apply rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.98];
+}
+
+.page-enter {
+  animation: page-fade 0.22s ease-out;
+}
+
+@keyframes page-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.portfolio-card {
+  @apply rounded-xl border border-slate-200 bg-white px-5 py-4 text-left transition duration-200 cursor-pointer;
+}
+
+.portfolio-card:hover {
+  transform: translateY(-3px) scale(1.005);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  border-color: rgb(147 197 253);
+}
+
+/* Thin scrollbar for forecast table */
+.thin-scroll::-webkit-scrollbar { width: 4px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+.thin-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }

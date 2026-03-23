@@ -1,0 +1,302 @@
+{
+  "info": {
+    "name": "AUTO INVEST API",
+    "_postman_id": "2f20d94f-8fc2-4b1f-beb7-1b5639a8a201",
+    "description": "Collection for AUTO INVEST DRF backend.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth - Register",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/register/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "register",
+            ""
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Register status is 201\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "var jsonData = pm.response.json();",
+              "if (jsonData.token) {",
+              "    pm.environment.set(\"auth_token\", jsonData.token);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth - Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/login/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "login",
+            ""
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Login status is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "var jsonData = pm.response.json();",
+              "if (jsonData.token) {",
+              "    pm.environment.set(\"auth_token\", jsonData.token);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Portfolio - List",
+      "request": {
+        "auth": {
+          "type": "apikey",
+          "apikey": [
+            {
+              "key": "key",
+              "value": "Authorization",
+              "type": "string"
+            },
+            {
+              "key": "value",
+              "value": "Token {{auth_token}}",
+              "type": "string"
+            },
+            {
+              "key": "in",
+              "value": "header",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/portfolio/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "portfolio",
+            ""
+          ]
+        }
+      }
+    },
+    {
+      "name": "Stocks - List",
+      "request": {
+        "auth": {
+          "type": "apikey",
+          "apikey": [
+            {
+              "key": "key",
+              "value": "Authorization",
+              "type": "string"
+            },
+            {
+              "key": "value",
+              "value": "Token {{auth_token}}",
+              "type": "string"
+            },
+            {
+              "key": "in",
+              "value": "header",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/stocks/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "stocks",
+            ""
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0].id) {",
+              "    pm.environment.set(\"stock_id\", jsonData[0].id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stocks - Detail",
+      "request": {
+        "auth": {
+          "type": "apikey",
+          "apikey": [
+            {
+              "key": "key",
+              "value": "Authorization",
+              "type": "string"
+            },
+            {
+              "key": "value",
+              "value": "Token {{auth_token}}",
+              "type": "string"
+            },
+            {
+              "key": "in",
+              "value": "header",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/stocks/{{stock_id}}/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "stocks",
+            "{{stock_id}}",
+            ""
+          ]
+        }
+      }
+    },
+    {
+      "name": "Stocks - Search",
+      "request": {
+        "auth": {
+          "type": "apikey",
+          "apikey": [
+            {
+              "key": "key",
+              "value": "Authorization",
+              "type": "string"
+            },
+            {
+              "key": "value",
+              "value": "Token {{auth_token}}",
+              "type": "string"
+            },
+            {
+              "key": "in",
+              "value": "header",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/stocks/search/?q={{query}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "stocks",
+            "search",
+            ""
+          ],
+          "query": [
+            {
+              "key": "q",
+              "value": "{{query}}"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "username",
+      "value": "postman_user"
+    },
+    {
+      "key": "email",
+      "value": "postman_user@example.com"
+    },
+    {
+      "key": "password",
+      "value": "postmanpass123"
+    },
+    {
+      "key": "auth_token",
+      "value": ""
+    },
+    {
+      "key": "stock_id",
+      "value": "1"
+    },
+    {
+      "key": "query",
+      "value": "tata"
+    }
+  ]
+}

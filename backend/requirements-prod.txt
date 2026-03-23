@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────
+# Clean production requirements for Linux VM
+# Install with: pip install -r requirements-prod.txt
+# ─────────────────────────────────────────────
+
+# Django core
+django>=4.2,<5.0
+djangorestframework
+django-cors-headers
+gunicorn
+
+# ML & Data
+tensorflow>=2.20.0
+keras>=3.0
+xgboost>=2.0
+scikit-learn
+numpy
+pandas
+yfinance
+umap-learn
+
+# Data viz / indicators
+matplotlib
+ta
+
+# Utilities
+requests
+python-decouple
+beautifulsoup4
+websockets

@@ -1,0 +1,3 @@
+# This file keeps the predictions directory structure in git.
+# Actual model files (.h5, XGBoost weights) are gitignored.
+# Upload them manually to the VM using scp — see deploy/DEPLOY.md Step 4.
