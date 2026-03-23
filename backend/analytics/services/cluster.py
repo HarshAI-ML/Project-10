@@ -5,7 +5,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import umap
+try:
+    import umap
+except ImportError:
+    umap = None
 from django.core.cache import cache
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score

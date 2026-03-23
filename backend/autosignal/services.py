@@ -5,7 +5,10 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
-from databricks import sql as databricks_sql
+try:
+    from databricks import sql as databricks_sql
+except ImportError:
+    databricks_sql = None
 
 
 # Databricks connectivity
