@@ -37,7 +37,11 @@ export const fetchStocks = async (portfolioId = null) => {
       direction_signal: item.direction_signal,
       model_confidence_r2: item.model_confidence_r2,
       recommended_action: item.recommended_action,
-      prediction_status: item.prediction_status || "insufficient_data",
+      prediction_status:
+        item.prediction_status ||
+        (item.predicted_price_1d !== null && item.predicted_price_1d !== undefined
+          ? "ready"
+          : "insufficient_data"),
       pe_ratio: item.pe_ratio,
       discount_level: item.discount_level,
       rsi_14: item.rsi_14,

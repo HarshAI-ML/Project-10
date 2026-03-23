@@ -51,7 +51,10 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
 
           <tbody className="divide-y divide-slate-50">
             {stocks.map((stock) => {
-              const ok       = stock.prediction_status === "ok";
+              const ok =
+                stock.prediction_status === "ok" ||
+                stock.prediction_status === "ready" ||
+                (stock.predicted_price_1d !== null && stock.predicted_price_1d !== undefined);
               const currency = currencyCodeFromItem(stock);
               const changeUp = ok && Number(stock.expected_change_pct || 0) >= 0;
               const isIncrease = stock.direction_signal?.includes("Increase");

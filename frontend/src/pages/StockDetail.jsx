@@ -155,7 +155,10 @@ export default function StockDetail() {
 
   const backQuery = stock.portfolio ? `?portfolio=${stock.portfolio}` : "";
   const currency = currencyCodeFromItem(stock);
-  const hasPrediction = stock.prediction_status === "ok";
+  const hasPrediction =
+    stock.prediction_status === "ok" ||
+    stock.prediction_status === "ready" ||
+    (stock.predicted_price_1d !== null && stock.predicted_price_1d !== undefined);
   const predMissing =
     stock.prediction_status === "insufficient_data" ? "Insufficient Data" : "Unavailable";
 
