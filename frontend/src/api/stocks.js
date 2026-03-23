@@ -15,8 +15,11 @@ export const addStockToPortfolio = async (portfolioId, symbol) => {
   return data;
 };
 
-export const removeStockFromPortfolio = async (stockId) => {
-  await api.delete(`stocks/${stockId}/remove/`);
+export const removeStockFromPortfolio = async (portfolioId, symbol) => {
+  const queryParams = new URLSearchParams({
+    symbol: String(symbol || "").toUpperCase(),
+  });
+  await api.delete(`portfolio/${portfolioId}/remove-stock/?${queryParams.toString()}`);
 };
 
 export const fetchStocks = async (portfolioId = null) => {

@@ -36,7 +36,7 @@ from analytics.services.yahoo_search import (
     search_live_stocks,
 )
 from pipeline.models import SilverCleanedPrice
-from portfolio.models import Portfolio, Stock
+from portfolio.models import Portfolio, PortfolioStock, Stock
 from portfolio.services import create_default_portfolios_for_user, user_has_default_portfolios
 
 
@@ -156,6 +156,40 @@ class PortfolioViewSet(
         return Response(
             StockListSerializer(stock).data,
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["delete"], url_path="remove-stock")
+    def remove_stock(self, request, pk=None):
+        """
+        Remove a stock from a portfolio without touching the StockMaster table.
+        Expected query param: ?symbol=RELIANCE.NS
+        """
+        portfolio = self.get_object()
+        symbol = request.query_params.get("symbol", "").strip().upper()
+
+        if not symbol:
+            return Response(
+                {"detail": "Query param 'symbol' is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        deleted_count, _ = PortfolioStock.objects.filter(
+            portfolio=portfolio,
+            ticker=symbol,
+        ).delete()
+
+        # Legacy cleanup only for this user's portfolio row.
+        Stock.objects.filter(portfolio=portfolio, symbol=symbol).delete()
+
+        if deleted_count == 0:
+            return Response(
+                {"detail": f"Stock '{symbol}' not found in portfolio '{portfolio.name}'."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {"deleted": deleted_count, "symbol": symbol},
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=["get"], url_path="clusters")
@@ -304,7 +338,6 @@ class PredictionViewSet(viewsets.GenericViewSet):
             )
 
 from rest_framework.permissions import IsAuthenticated
-from portfolio.models import PortfolioStock
 from api.serializers import PortfolioStockSerializer
 
 class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):

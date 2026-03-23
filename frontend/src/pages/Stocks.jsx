@@ -110,13 +110,13 @@ export default function Stocks() {
     } finally { setAddingSymbol(""); }
   };
 
-  const handleDeleteStock = async (stockId, symbol) => {
-    if (!stockId || !portfolioId) return;
-    setDeletingStockId(stockId);
+  const handleDeleteStock = async (symbol) => {
+    if (!symbol || !portfolioId) return;
+    setDeletingStockId(symbol);
     setMessage("");
     setError("");
     try {
-      await removeStockFromPortfolio(stockId);
+      await removeStockFromPortfolio(portfolioId, symbol);
       setStocks((await fetchStocks(portfolioId)) || []);
       setMessage(`${symbol} removed.`);
     } catch (err) {

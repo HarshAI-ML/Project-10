@@ -5,7 +5,6 @@ import uuid
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from pipeline.fetchers.news_fetcher import NewsFetcher
 from pipeline.fetchers.yfinance_fetcher import YFinanceBatchFetcher
 from pipeline.models import PipelineRun
 from pipeline.processors.cleaner import process_all_tickers
@@ -49,6 +48,16 @@ class Command(BaseCommand):
             f"{result['total_rows']} rows written"
         )
 
+    def _run_news(self, run):
+        self.stdout.write("\n[2/2] Fetching news...")
+        from pipeline.fetchers.news_fetcher import fetch_and_store_news
+        result = fetch_and_store_news()
+        self.stdout.write(
+            f"  News done: {result['new']} new articles | "
+            f"{result['skipped']} already existed | "
+            f"{result['fetched']} total fetched"
+        )
+
     def _run_gold(self, run):
         self.stdout.write("\n[Gold] Computing signals + forecasts...")
 
@@ -90,10 +99,7 @@ class Command(BaseCommand):
                 self.stdout.write("Price fetching complete.")
 
             if mode in ["all", "full", "news"]:
-                self.stdout.write("Running news fetcher...")
-                news_fetcher = NewsFetcher()
-                news_fetcher.fetch_news()
-                self.stdout.write("News fetching complete.")
+                self._run_news(run_record)
 
             if mode in ["all", "full", "silver"]:
                 self._run_silver(run_record)

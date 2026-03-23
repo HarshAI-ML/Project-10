@@ -32,12 +32,12 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
         <table className="min-w-full">
           <thead>
             <tr className="sticky top-0 z-10 bg-slate-900 text-white">
-              {["Symbol", "Company", "Price", "Min", "Max", "Predicted (1D)", "% Change", "Signal", "R²", "PE", "Discount", ""].map(
+              {["Symbol", "Company", "Price", "Min", "Max", "Predicted (1D)", "% Change", "Signal", "R²", "PE", "Discount", "Action"].map(
                 (h) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${
-                      h === "" || h === "Symbol" || h === "Company" || h === "Signal" || h === "Discount"
+                      h === "Symbol" || h === "Company" || h === "Signal" || h === "Discount" || h === "Action"
                         ? "text-left"
                         : "text-right"
                     }`}
@@ -161,17 +161,17 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
 
                   {/* Delete */}
                   <td className="px-4 py-3 text-right">
-                    {stock.id && (
+                    {stock.symbol && (
                       <button
                         type="button"
                         className="rounded-lg border border-rose-100 bg-white px-2.5 py-1 text-xs font-semibold text-rose-500 opacity-0 transition group-hover:opacity-100 hover:bg-rose-50 disabled:opacity-40"
-                        disabled={deletingStockId === stock.id}
+                        disabled={deletingStockId === stock.symbol}
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (onDeleteStock) onDeleteStock(stock.id, stock.symbol);
+                          if (onDeleteStock) onDeleteStock(stock.symbol);
                         }}
                       >
-                        {deletingStockId === stock.id ? "…" : "Remove"}
+                        {deletingStockId === stock.symbol ? "…" : "Remove"}
                       </button>
                     )}
                   </td>
@@ -184,3 +184,4 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
     </div>
   );
 }
+
