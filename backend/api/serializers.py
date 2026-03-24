@@ -1,7 +1,11 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from analytics.data_access import get_fundamentals_bulk, get_latest_insights_bulk
+from analytics.data_access import (
+    get_fundamentals_bulk,
+    get_latest_insights_bulk,
+    get_stocks_sentiment_bulk,
+)
 from portfolio.models import Portfolio, Stock, PortfolioStock
 
 
@@ -93,6 +97,32 @@ class GoldInsightMixin:
     def _fundamentals(self, obj):
         return self._fundamentals_map().get(obj.symbol, {})
 
+    def _sentiment_map(self):
+        if hasattr(self, "_cached_sentiment_map"):
+            return self._cached_sentiment_map
+
+        instance = getattr(self, "instance", None)
+        tickers = set()
+
+        if instance is None:
+            self._cached_sentiment_map = {}
+            return self._cached_sentiment_map
+
+        if isinstance(instance, (list, tuple)):
+            tickers = {obj.symbol for obj in instance if getattr(obj, "symbol", None)}
+        elif hasattr(instance, "__iter__") and not isinstance(instance, Stock):
+            tickers = {obj.symbol for obj in instance if getattr(obj, "symbol", None)}
+        else:
+            symbol = getattr(instance, "symbol", None)
+            if symbol:
+                tickers = {symbol}
+
+        self._cached_sentiment_map = get_stocks_sentiment_bulk(list(tickers)) if tickers else {}
+        return self._cached_sentiment_map
+
+    def _sentiment(self, obj):
+        return self._sentiment_map().get(obj.symbol, {})
+
 
 class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
     pe_ratio = serializers.SerializerMethodField()
@@ -107,6 +137,9 @@ class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
     model_confidence_r2 = serializers.FloatField(read_only=True)
     prediction_status = serializers.CharField(read_only=True)
     recommended_action = serializers.CharField(read_only=True)
+    sentiment_score = serializers.SerializerMethodField()
+    sentiment_label = serializers.SerializerMethodField()
+    sentiment_source = serializers.SerializerMethodField()
 
     class Meta:
         model = Stock
@@ -125,6 +158,9 @@ class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
             "model_confidence_r2",
             "prediction_status",
             "recommended_action",
+            "sentiment_score",
+            "sentiment_label",
+            "sentiment_source",
             "pe_ratio",
             "discount_level",
         )
@@ -140,6 +176,15 @@ class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
 
     def get_discount_level(self, obj):
         return self._insight(obj).get("discount_level")
+
+    def get_sentiment_score(self, obj):
+        return self._sentiment(obj).get("sentiment_score")
+
+    def get_sentiment_label(self, obj):
+        return self._sentiment(obj).get("sentiment_label")
+
+    def get_sentiment_source(self, obj):
+        return self._sentiment(obj).get("model_used")
 
     def get_min_price(self, obj):
         prices = self._price_series(obj)
@@ -175,6 +220,9 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
     model_confidence_r2 = serializers.FloatField(read_only=True)
     prediction_status = serializers.CharField(read_only=True)
     recommended_action = serializers.CharField(read_only=True)
+    sentiment_score = serializers.SerializerMethodField()
+    sentiment_label = serializers.SerializerMethodField()
+    sentiment_source = serializers.SerializerMethodField()
 
     class Meta:
         model = Stock
@@ -196,6 +244,9 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
             "model_confidence_r2",
             "prediction_status",
             "recommended_action",
+            "sentiment_score",
+            "sentiment_label",
+            "sentiment_source",
             "analytics",
         )
 
@@ -249,6 +300,15 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
 
     def get_currency(self, obj):
         return _infer_currency_from_symbol(obj.symbol)
+
+    def get_sentiment_score(self, obj):
+        return self._sentiment(obj).get("sentiment_score")
+
+    def get_sentiment_label(self, obj):
+        return self._sentiment(obj).get("sentiment_label")
+
+    def get_sentiment_source(self, obj):
+        return self._sentiment(obj).get("model_used")
 
 
 class PortfolioSerializer(serializers.ModelSerializer):

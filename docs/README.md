@@ -65,6 +65,36 @@ Populate Gold:
 python manage.py run_pipeline --mode=gold
 ```
 
+## 4) Sentiment Pipeline (Silver + Gold)
+
+Sentiment mode combines:
+
+- FinBERT news sentiment
+- Price momentum signal
+- Technical indicator signal
+
+Writes:
+
+- `pipeline.SilverSentimentScore` (ticker-level sentiment)
+- `pipeline.GoldSectorSentiment` (sector-level sentiment)
+
+Run sentiment only:
+
+```bash
+python manage.py run_pipeline --mode=sentiment --text-mode=title
+```
+
+`text-mode` options:
+
+- `title` (fast, recommended for daily refresh)
+- `both` (title + description, better context; recommended nightly)
+
+Nightly/full sentiment:
+
+```bash
+python manage.py run_pipeline --mode=sentiment --text-mode=both
+```
+
 ## Where `run_analytics` Fits
 
 Command:
@@ -95,6 +125,7 @@ For fresh or full refresh runs:
 python manage.py run_pipeline --mode=prices --period=1y
 python manage.py run_pipeline --mode=silver
 python manage.py run_pipeline --mode=gold
+python manage.py run_pipeline --mode=sentiment --text-mode=title
 python manage.py run_analytics --skip-prediction
 ```
 
@@ -102,6 +133,20 @@ Optional final prediction refresh:
 
 ```bash
 python manage.py run_analytics
+```
+
+## Sentiment Verification
+
+Quick checks:
+
+```bash
+python manage.py shell -c "from pipeline.models import SilverSentimentScore, GoldSectorSentiment; print('SilverSentimentScore:', SilverSentimentScore.objects.count()); print('GoldSectorSentiment:', GoldSectorSentiment.objects.count())"
+```
+
+Label distribution:
+
+```bash
+python manage.py shell -c "from django.db.models import Count; from pipeline.models import SilverSentimentScore; print(list(SilverSentimentScore.objects.values('sentiment_label').annotate(c=Count('sentiment_label')).order_by('sentiment_label')))"
 ```
 
 ## Quick Mental Model

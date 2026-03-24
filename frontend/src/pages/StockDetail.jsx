@@ -66,6 +66,27 @@ const DiscountBadge = ({ level }) => {
   );
 };
 
+const SentimentBadge = ({ score, label }) => {
+  if (score === null || score === undefined) {
+    return (
+      <span className="rounded-full px-3 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 bg-slate-100 text-slate-500 ring-slate-200">
+        No Data
+      </span>
+    );
+  }
+  const styles =
+    Number(score) >= 6.5
+      ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+      : Number(score) >= 4.0
+      ? "bg-amber-100 text-amber-700 ring-amber-200"
+      : "bg-rose-100 text-rose-600 ring-rose-200";
+  return (
+    <span className={`rounded-full px-3 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ${styles}`}>
+      {Number(score).toFixed(2)} ({label || "Neutral"})
+    </span>
+  );
+};
+
 /* ── Metric card ─────────────────────────────────────────────── */
 const MetricCard = ({ label, value, sub, accent = "indigo", large = false }) => {
   const accents = {
@@ -249,7 +270,7 @@ export default function StockDetail() {
       </div>
 
       {/* ── Analytics metrics row ── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           label="Signal"
           value={
@@ -279,6 +300,12 @@ export default function StockDetail() {
           value={stock.analytics?.pe_ratio ?? "—"}
           sub="Trailing / forward PE"
           accent="violet"
+        />
+        <MetricCard
+          label="Sentiment"
+          value={<SentimentBadge score={stock.sentiment_score} label={stock.sentiment_label} />}
+          sub={stock.sentiment_source ? `Source: ${stock.sentiment_source}` : "Source unavailable"}
+          accent="amber"
         />
       </div>
 

@@ -502,3 +502,74 @@ def get_latest_insights_bulk(tickers: list) -> dict:
             results[entry["ticker"]] = dict(row)
 
     return results
+
+
+def get_stock_sentiment(ticker: str) -> dict:
+    """Get latest sentiment score for a ticker."""
+    from pipeline.models import SilverSentimentScore
+
+    row = (
+        SilverSentimentScore.objects
+        .filter(ticker=ticker)
+        .order_by("-date")
+        .values("sentiment_score", "sentiment_label", "article_count", "model_used", "date")
+        .first()
+    )
+    return dict(row) if row else {}
+
+
+def get_sector_sentiment(geography: str = None) -> list:
+    """Get latest sector sentiment rows, optionally filtered by geography."""
+    from django.db.models import Max
+    from pipeline.models import GoldSectorSentiment
+
+    latest_dates = (
+        GoldSectorSentiment.objects
+        .values("sector", "geography")
+        .annotate(max_date=Max("date"))
+    )
+
+    results = []
+    for entry in latest_dates:
+        if geography and entry["geography"] != geography:
+            continue
+        row = (
+            GoldSectorSentiment.objects
+            .filter(
+                sector=entry["sector"],
+                geography=entry["geography"],
+                date=entry["max_date"],
+            )
+            .values("sector", "geography", "sentiment_score", "sentiment_label", "stock_count", "date")
+            .first()
+        )
+        if row:
+            results.append(dict(row))
+
+    return sorted(results, key=lambda row: row["sentiment_score"], reverse=True)
+
+
+def get_stocks_sentiment_bulk(tickers: list) -> dict:
+    """Get latest sentiment for multiple tickers in one query."""
+    from django.db.models import Max
+    from pipeline.models import SilverSentimentScore
+
+    latest = (
+        SilverSentimentScore.objects
+        .filter(ticker__in=tickers)
+        .values("ticker")
+        .annotate(max_date=Max("date"))
+    )
+
+    results = {}
+    for entry in latest:
+        row = (
+            SilverSentimentScore.objects
+            .filter(ticker=entry["ticker"], date=entry["max_date"])
+            .values("sentiment_score", "sentiment_label", "article_count", "model_used")
+            .first()
+        )
+        if row:
+            results[entry["ticker"]] = dict(row)
+
+    return results

@@ -10,7 +10,6 @@ const NAV_LINKS = [
   { label: "Compare",       path: "/compare",     key: "compare"   },
   { label: "Prediction",    path: "/prediction",  key: "prediction"},
   { label: "Clusters",      path: null,           key: "clusters"  },
-  { label: "AutoSignal",  path: "/autosignal",  key: "autosignal" },
 ];
 
 export default function Navbar() {
@@ -35,7 +34,6 @@ export default function Navbar() {
     if (key === "compare")   return location.pathname.startsWith("/compare");
     if (key === "prediction")return location.pathname.startsWith("/prediction");
     if (key === "clusters")  return location.pathname.includes("/clusters");
-    if (key === "autosignal") return location.pathname.startsWith("/autosignal");
     return false;
   };
 

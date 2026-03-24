@@ -23,6 +23,7 @@ from analytics.data_access import (
     get_latest_insights_bulk,
     get_latest_price,
     get_latest_signals_bulk,
+    get_stocks_sentiment_bulk,
     get_stock_info,
     search_stocks,
 )
@@ -427,6 +428,7 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
         fund_map = get_fundamentals_bulk(tickers)
         signal_map = get_latest_signals_bulk(tickers)
         forecast_map = get_latest_forecasts_bulk(tickers)
+        sentiment_map = get_stocks_sentiment_bulk(tickers)
 
         old_stocks = Stock.objects.filter(symbol__in=tickers)
         old_stock_map = {s.symbol: s for s in old_stocks}
@@ -447,6 +449,7 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                 fund = fund_map.get(ticker, {})
                 signal_data = signal_map.get(ticker, {})
                 forecast_data = forecast_map.get(ticker, {})
+                sent = sentiment_map.get(ticker, {})
 
                 daily_ret = silver.get("daily_return")
                 direction = forecast_data.get("direction")
@@ -475,6 +478,9 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "prediction_status": "ready" if forecast_data else "insufficient_data",
                         "signal": signal_data.get("signal", ""),
                         "signal_confidence": signal_data.get("confidence"),
+                        "sentiment_score": sent.get("sentiment_score"),
+                        "sentiment_label": sent.get("sentiment_label"),
+                        "sentiment_source": sent.get("model_used"),
                         "pe_ratio": fund.get("trailing_pe"),
                         "forward_pe": fund.get("forward_pe"),
                         "profit_margin": fund.get("profit_margin"),
@@ -509,6 +515,9 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "prediction_status": "insufficient_data",
                         "signal": "",
                         "signal_confidence": None,
+                        "sentiment_score": None,
+                        "sentiment_label": None,
+                        "sentiment_source": None,
                         "pe_ratio": None,
                         "forward_pe": None,
                         "profit_margin": None,

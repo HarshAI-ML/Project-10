@@ -10,6 +10,7 @@ from pipeline.models import PipelineRun
 from pipeline.processors.cleaner import process_all_tickers
 from pipeline.processors.forecaster import predict_all_tickers
 from pipeline.processors.insights import compute_insights_all
+from pipeline.processors.sentiment import aggregate_sector_sentiment, compute_sentiment_all
 from pipeline.processors.signals import compute_signals_all
 from scripts.nifty500_top200 import ALL_STOCKS
 
@@ -24,8 +25,8 @@ class Command(BaseCommand):
             "--mode",
             type=str,
             default="all",
-            choices=["prices", "news", "full", "silver", "gold", "all"],
-            help="Runs specific parts of the pipeline: prices, news, silver, gold, full/all",
+            choices=["prices", "news", "full", "silver", "gold", "sentiment", "all"],
+            help="Runs specific parts of the pipeline: prices, news, silver, gold, sentiment, full/all",
         )
         parser.add_argument(
             "--period",
@@ -38,6 +39,13 @@ class Command(BaseCommand):
             type=str,
             default="1d",
             help="Interval to fetch (e.g., 1d, 1h) - only used for prices",
+        )
+        parser.add_argument(
+            "--text-mode",
+            type=str,
+            default="both",
+            choices=["title", "both"],
+            help="FinBERT input mode for sentiment: title only (fast) or title+description (balanced).",
         )
 
     def _run_silver(self, run):
@@ -84,10 +92,29 @@ class Command(BaseCommand):
             f"{insight_result['failed']} failed"
         )
 
+    def _run_sentiment(self, run, text_mode="both"):
+        self.stdout.write(f"\n[Sentiment] Running FinBERT + price signals (text_mode={text_mode})...")
+        result = compute_sentiment_all(text_mode=text_mode)
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  Stock sentiment: {result['success']} ok / "
+                f"{result['failed']} failed / "
+                f"{result['no_news']} price-only (no news)"
+            )
+        )
+
+        sec_result = aggregate_sector_sentiment()
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  Sector sentiment: {sec_result['sectors']} sectors written to Gold"
+            )
+        )
+
     def handle(self, *args, **options):
         mode = options["mode"]
         period = options["period"]
         interval = options["interval"]
+        text_mode = options["text_mode"]
 
         self.stdout.write(self.style.SUCCESS(f"Starting pipeline run (Mode: {mode}, Period: {period})"))
 
@@ -114,6 +141,9 @@ class Command(BaseCommand):
 
             if mode in ["gold", "all"]:
                 self._run_gold(run_record)
+
+            if mode in ["sentiment", "all"]:
+                self._run_sentiment(run_record, text_mode=text_mode)
 
             run_record.status = "SUCCESS"
             run_record.message = f"Pipeline {mode} finished successfully."

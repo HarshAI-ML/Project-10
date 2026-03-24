@@ -289,3 +289,43 @@ class GoldStockInsight(models.Model):
 
     def __str__(self):
         return f"{self.ticker} | {self.date} | {self.discount_level} | {self.opportunity_score}"
+
+
+class SilverSentimentScore(models.Model):
+    ticker = models.CharField(max_length=30, db_index=True)
+    date = models.DateField(db_index=True)
+    sentiment_score = models.FloatField()
+    sentiment_label = models.CharField(max_length=20)
+    article_count = models.IntegerField(default=0)
+    finbert_score = models.FloatField(null=True)
+    momentum_score = models.FloatField(null=True)
+    technical_score = models.FloatField(null=True)
+    model_used = models.CharField(max_length=50, default="finbert+price")
+    text_mode = models.CharField(max_length=10, default="both")
+    computed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["ticker", "date"]]
+        ordering = ["-date"]
+        indexes = [models.Index(fields=["ticker", "date"])]
+
+    def __str__(self):
+        return f"{self.ticker} | {self.date} | {self.sentiment_score:.2f} ({self.sentiment_label})"
+
+
+class GoldSectorSentiment(models.Model):
+    sector = models.CharField(max_length=100, db_index=True)
+    geography = models.CharField(max_length=5, blank=True, db_index=True)
+    date = models.DateField(db_index=True)
+    sentiment_score = models.FloatField()
+    sentiment_label = models.CharField(max_length=20)
+    stock_count = models.IntegerField(default=0)
+    computed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["sector", "geography", "date"]]
+        ordering = ["-date", "sector"]
+        indexes = [models.Index(fields=["sector", "geography", "date"])]
+
+    def __str__(self):
+        return f"{self.sector} ({self.geography}) | {self.date} | {self.sentiment_score:.2f}"

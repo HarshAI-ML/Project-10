@@ -40,6 +40,9 @@ export const fetchStocks = async (portfolioId = null) => {
       direction_signal: item.direction_signal,
       model_confidence_r2: item.model_confidence_r2,
       recommended_action: item.recommended_action,
+      sentiment_score: item.sentiment_score,
+      sentiment_label: item.sentiment_label,
+      sentiment_source: item.sentiment_source,
       prediction_status:
         item.prediction_status ||
         (item.predicted_price_1d !== null && item.predicted_price_1d !== undefined
