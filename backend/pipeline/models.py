@@ -8,7 +8,10 @@ class BronzeStockPrice(models.Model):
     """
     ticker        = models.CharField(max_length=30, db_index=True)
     company       = models.CharField(max_length=200)
+    # Backward-compatible day bucket used by existing analytics reads.
     date          = models.DateField(db_index=True)
+    # Precise candle timestamp (UTC naive) for incremental/hourly ingestion.
+    candle_at     = models.DateTimeField(null=True, blank=True, db_index=True)
     open          = models.FloatField(null=True)
     high          = models.FloatField(null=True)
     low           = models.FloatField(null=True)
@@ -21,6 +24,10 @@ class BronzeStockPrice(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=['ticker', 'date']),
+            models.Index(fields=['ticker', 'candle_at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['ticker', 'candle_at'], name='uq_bronze_ticker_candle_at'),
         ]
         ordering = ['-date']
 

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import logging
 
 from django.contrib.auth import authenticate
 from django.db.models import Max, Min, Q
@@ -23,6 +24,7 @@ from analytics.data_access import (
     get_latest_insights_bulk,
     get_latest_price,
     get_latest_signals_bulk,
+    get_sector_sentiment,
     get_stocks_sentiment_bulk,
     get_stock_info,
     search_stocks,
@@ -39,6 +41,8 @@ from analytics.services.yahoo_search import (
 from pipeline.models import SilverCleanedPrice
 from portfolio.models import Portfolio, PortfolioStock, Stock
 from portfolio.services import create_default_portfolios_for_user, user_has_default_portfolios
+
+logger = logging.getLogger(__name__)
 
 
 class AuthViewSet(viewsets.GenericViewSet):
@@ -115,6 +119,98 @@ class PortfolioViewSet(
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        payload = list(serializer.data)
+
+        if not payload:
+            return Response(payload)
+
+        try:
+            portfolio_ids = [portfolio.id for portfolio in queryset]
+            rows = list(
+                PortfolioStock.objects
+                .filter(portfolio_id__in=portfolio_ids)
+                .values("portfolio_id", "ticker", "sector")
+            )
+
+            tickers = sorted({row["ticker"] for row in rows if row.get("ticker")})
+            sentiment_map = get_stocks_sentiment_bulk(tickers) if tickers else {}
+            sector_rows = get_sector_sentiment()
+
+            sector_geo_map = {}
+            sector_any_map = {}
+            sector_acc = {}
+            for row in sector_rows:
+                sector = row.get("sector")
+                geo = row.get("geography")
+                score = row.get("sentiment_score")
+                if sector is None or score is None:
+                    continue
+                sector_geo_map[(sector, geo)] = score
+                sector_acc.setdefault(sector, []).append(score)
+            for sector, scores in sector_acc.items():
+                if scores:
+                    sector_any_map[sector] = round(sum(scores) / len(scores), 4)
+
+            portfolio_tickers = {}
+            portfolio_sectors = {}
+            for row in rows:
+                pid = row["portfolio_id"]
+                portfolio_tickers.setdefault(pid, []).append(row.get("ticker"))
+                sector = row.get("sector")
+                if sector:
+                    portfolio_sectors.setdefault(pid, set()).add(sector)
+
+            for item in payload:
+                pid = item["id"]
+                geo = item.get("geography") or "ALL"
+                ptickers = [ticker for ticker in portfolio_tickers.get(pid, []) if ticker]
+                scores = [
+                    sentiment_map.get(ticker, {}).get("sentiment_score")
+                    for ticker in ptickers
+                    if sentiment_map.get(ticker, {}).get("sentiment_score") is not None
+                ]
+
+                if scores:
+                    portfolio_score = round(sum(scores) / len(scores), 4)
+                    if portfolio_score >= 6.5:
+                        label = "Positive"
+                    elif portfolio_score >= 4.0:
+                        label = "Neutral"
+                    else:
+                        label = "Negative"
+                    coverage = round((len(scores) / max(len(ptickers), 1)) * 100, 2)
+                else:
+                    portfolio_score = None
+                    label = "No Data"
+                    coverage = 0.0
+
+                s_scores = []
+                for sector in portfolio_sectors.get(pid, set()):
+                    if geo != "ALL" and (sector, geo) in sector_geo_map:
+                        s_scores.append(sector_geo_map[(sector, geo)])
+                    elif sector in sector_any_map:
+                        s_scores.append(sector_any_map[sector])
+                sector_score = round(sum(s_scores) / len(s_scores), 4) if s_scores else None
+
+                item["sentiment_score"] = portfolio_score
+                item["sentiment_label"] = label
+                item["sentiment_coverage_pct"] = coverage
+                item["sentiment_stock_count"] = len(scores)
+                item["sector_sentiment_score"] = sector_score
+        except Exception:
+            logger.exception("[portfolio.list] Sentiment enrichment failed; returning base payload.")
+            for item in payload:
+                item.setdefault("sentiment_score", None)
+                item.setdefault("sentiment_label", "No Data")
+                item.setdefault("sentiment_coverage_pct", 0.0)
+                item.setdefault("sentiment_stock_count", 0)
+                item.setdefault("sector_sentiment_score", None)
+
+        return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="add-stock")
     def add_stock(self, request, pk=None):

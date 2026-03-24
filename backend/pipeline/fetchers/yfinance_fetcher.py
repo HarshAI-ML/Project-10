@@ -1,6 +1,8 @@
 import logging
 import time
+import uuid
 from typing import List, Optional
+from datetime import timezone as dt_timezone
 
 import pandas as pd
 import yfinance as yf
@@ -26,6 +28,7 @@ class YFinanceBatchFetcher:
         """
         if not tickers:
             return
+        self.fetch_run_id = uuid.uuid4().hex
             
         logger.info(f"YFinanceBatchFetcher: Fetching {len(tickers)} tickers. Period={period}, Interval={interval}")
         
@@ -79,21 +82,28 @@ class YFinanceBatchFetcher:
                 
             # Handle tz-aware vs naive
             if hasattr(index, "tz_convert"):
-                date_val = index.tz_localize(None).date()
+                candle_at = pd.Timestamp(index).tz_localize(None).to_pydatetime()
+                date_val = candle_at.date()
             else:
-                date_val = index.date()
+                candle_at = pd.Timestamp(index).to_pydatetime()
+                date_val = candle_at.date()
+            if timezone.is_naive(candle_at):
+                candle_at = timezone.make_aware(candle_at, timezone=dt_timezone.utc)
                 
             # Create a single row object
             objects_to_create.append(
                 BronzeStockPrice(
                     ticker=ticker.upper(),
+                    company=ticker.upper(),
                     date=date_val,
+                    candle_at=candle_at,
                     open=row.get('open'),
                     high=row.get('high'),
                     low=row.get('low'),
                     close=row.get('close'),
                     volume=row.get('volume', 0),
-                    ingested_at=timezone.now()
+                    ingested_at=timezone.now(),
+                    fetch_run_id=self.fetch_run_id,
                 )
             )
             

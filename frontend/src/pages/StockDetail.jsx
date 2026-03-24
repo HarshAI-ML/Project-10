@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Area,
@@ -6,7 +6,6 @@ import {
   CartesianGrid,
   Legend,
   Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -17,7 +16,7 @@ import Loader from "../components/Loader";
 import { fetchStockById } from "../api/stocks";
 import { currencyCodeFromItem, formatMoney } from "../utils/currency";
 
-/* ── Custom chart tooltip ────────────────────────────────────── */
+/* Custom chart tooltip */
 const CustomTooltip = ({ active, payload, label, currency }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -34,7 +33,7 @@ const CustomTooltip = ({ active, payload, label, currency }) => {
   );
 };
 
-/* ── Signal badge ─────────────────────────────────────────────── */
+/* Signal badge */
 const SignalBadge = ({ signal }) => {
   const up = signal?.toLowerCase().includes("increase");
   return (
@@ -46,12 +45,12 @@ const SignalBadge = ({ signal }) => {
       }`}
     >
       <span>{up ? "▲" : "▼"}</span>
-      {signal || "—"}
+      {signal || "-"}
     </span>
   );
 };
 
-/* ── Discount badge ───────────────────────────────────────────── */
+/* Discount badge */
 const DiscountBadge = ({ level }) => {
   const styles = {
     HIGH: "bg-emerald-100 text-emerald-700 ring-emerald-200",
@@ -61,7 +60,7 @@ const DiscountBadge = ({ level }) => {
   };
   return (
     <span className={`rounded-full px-3 py-0.5 text-xs font-bold uppercase tracking-wide ring-1 ${styles[level] || styles.UNKNOWN}`}>
-      {level || "—"}
+      {level || "-"}
     </span>
   );
 };
@@ -87,7 +86,7 @@ const SentimentBadge = ({ score, label }) => {
   );
 };
 
-/* ── Metric card ─────────────────────────────────────────────── */
+/* Metric card */
 const MetricCard = ({ label, value, sub, accent = "indigo", large = false }) => {
   const accents = {
     indigo: "border-indigo-100 bg-gradient-to-br from-white to-indigo-50/40",
@@ -106,9 +105,7 @@ const MetricCard = ({ label, value, sub, accent = "indigo", large = false }) => 
   );
 };
 
-/* ════════════════════════════════════════════════════════════════
-   Main Page
-════════════════════════════════════════════════════════════════ */
+/* Main page */
 export default function StockDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -202,14 +199,14 @@ export default function StockDetail() {
   return (
     <section className="mx-auto max-w-6xl space-y-8 px-4 py-8">
 
-      {/* ── Back + title ── */}
+      {/* Back + title */}
       <div className="flex items-center justify-between">
         <div>
           <Link
             to={`/stocks${backQuery}`}
             className="mb-2 inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-indigo-600 transition-colors"
           >
-            ← Back to Stocks
+            &larr; Back to Stocks
           </Link>
           <h1 className="text-2xl font-bold text-slate-900">{stock.company_name}</h1>
           <p className="mt-0.5 font-mono text-sm text-slate-400">{stock.symbol}</p>
@@ -217,7 +214,7 @@ export default function StockDetail() {
         <DiscountBadge level={stock.analytics?.discount_level} />
       </div>
 
-      {/* ── Hero price strip ── */}
+      {/* Hero price strip */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-violet-950 p-8 text-white shadow-xl">
         {/* decorative circle */}
         <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-indigo-500/10" />
@@ -240,7 +237,7 @@ export default function StockDetail() {
                   ? "text-amber-400"
                   : "text-rose-400"
               }`}>
-                📊 Sentiment: {Number(stock.sentiment_score).toFixed(2)}
+                Sentiment: {Number(stock.sentiment_score).toFixed(2)}
               </p>
             )}
           </div>
@@ -268,19 +265,19 @@ export default function StockDetail() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Opportunity Score</p>
             <p className="mt-2 text-4xl font-extrabold text-amber-400">
-              {stock.analytics?.opportunity_score ?? "—"}
+              {stock.analytics?.opportunity_score ?? "-"}
             </p>
             <p className="mt-1.5 text-xs text-slate-400">
               PE&nbsp;
-              <span className="font-bold text-slate-200">{stock.analytics?.pe_ratio ?? "—"}</span>
-              &nbsp;· Sector&nbsp;
-              <span className="font-bold text-slate-200">{stock.sector || "—"}</span>
+              <span className="font-bold text-slate-200">{stock.analytics?.pe_ratio ?? "-"}</span>
+              &nbsp;| Sector&nbsp;
+              <span className="font-bold text-slate-200">{stock.sector || "-"}</span>
             </p>
           </div>
         </div>
       </div>
 
-      {/* ── Analytics metrics row ── */}
+      {/* Analytics metrics row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           label="Signal"
@@ -295,7 +292,7 @@ export default function StockDetail() {
           accent="slate"
         />
         <MetricCard
-          label="Model Confidence (R²)"
+          label="Model Confidence (R2)"
           value={hasPrediction ? Number(stock.model_confidence_r2 || 0).toFixed(3) : predMissing}
           sub="1 = perfect fit"
           accent={hasPrediction && Number(stock.model_confidence_r2) > 0.7 ? "emerald" : "amber"}
@@ -308,7 +305,7 @@ export default function StockDetail() {
         />
         <MetricCard
           label="PE Ratio"
-          value={stock.analytics?.pe_ratio ?? "—"}
+          value={stock.analytics?.pe_ratio ?? "-"}
           sub="Trailing / forward PE"
           accent="violet"
         />
@@ -320,126 +317,7 @@ export default function StockDetail() {
         />
       </div>
 
-      {/* ── Sentiment Analysis Card ── */}
-      <div className="relative rounded-3xl bg-gradient-to-br from-amber-50 via-white to-orange-50 p-8 shadow-lg ring-1 ring-amber-100 overflow-hidden">
-        {/* Decorative accents */}
-        <div className="absolute top-0 right-0 -mr-24 -mt-24 h-48 w-48 rounded-full bg-amber-400/15" />
-        <div className="absolute bottom-0 left-0 -ml-16 -mb-16 h-32 w-32 rounded-full bg-orange-400/10" />
-        
-        <div className="relative">
-          <h2 className="text-lg font-bold text-slate-900">Market Sentiment</h2>
-          <p className="mt-1 text-xs text-slate-500">Real-time news and social media sentiment analysis</p>
-
-          <div className="mt-6 grid gap-6 lg:grid-cols-3">
-            {/* Main Sentiment Score */}
-            <div className="rounded-2xl border-2 border-amber-200 bg-white p-6 shadow-md">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Sentiment Score</p>
-              
-              {stock.sentiment_score !== null && stock.sentiment_score !== undefined ? (
-                <>
-                  <p className="text-5xl font-extrabold text-amber-600 mb-2">
-                    {Number(stock.sentiment_score).toFixed(2)}
-                  </p>
-                  
-                  {/* Visual sentiment gauge */}
-                  <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden mb-3">
-                    <div
-                      className={`h-full rounded-full transition-all duration-700 ${
-                        Number(stock.sentiment_score) >= 6.5
-                          ? "bg-gradient-to-r from-emerald-400 to-emerald-600"
-                          : Number(stock.sentiment_score) >= 4.0
-                          ? "bg-gradient-to-r from-amber-400 to-amber-600"
-                          : "bg-gradient-to-r from-rose-400 to-rose-600"
-                      }`}
-                      style={{ width: `${(Number(stock.sentiment_score) / 10) * 100}%` }}
-                    />
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${
-                      Number(stock.sentiment_score) >= 6.5
-                        ? "bg-emerald-500"
-                        : Number(stock.sentiment_score) >= 4.0
-                        ? "bg-amber-500"
-                        : "bg-rose-500"
-                    }`} />
-                    <span className="text-sm font-bold text-slate-700">
-                      {Number(stock.sentiment_score) >= 6.5
-                        ? "Very Positive"
-                        : Number(stock.sentiment_score) >= 5.5
-                        ? "Positive"
-                        : Number(stock.sentiment_score) >= 4.5
-                        ? "Neutral"
-                        : Number(stock.sentiment_score) >= 3.5
-                        ? "Negative"
-                        : "Very Negative"}
-                    </span>
-                  </div>
-                  
-                  <p className="mt-3 text-xs text-slate-500">Range: 0 (Very Negative) — 10 (Very Positive)</p>
-                </>
-              ) : (
-                <p className="text-slate-400 text-sm font-medium">No data available</p>
-              )}
-            </div>
-
-            {/* Sentiment Label & Interpretation */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">Market Outlook</p>
-              
-              <div className={`rounded-xl p-4 mb-4 ${
-                Number(stock.sentiment_score) >= 6.5
-                  ? "bg-emerald-50 border border-emerald-200"
-                  : Number(stock.sentiment_score) >= 4.0
-                  ? "bg-amber-50 border border-amber-200"
-                  : "bg-rose-50 border border-rose-200"
-              }`}>
-                <p className={`text-lg font-bold ${
-                  Number(stock.sentiment_score) >= 6.5
-                    ? "text-emerald-700"
-                    : Number(stock.sentiment_score) >= 4.0
-                    ? "text-amber-700"
-                    : "text-rose-700"
-                }`}>
-                  {stock.sentiment_label || "Neutral"}
-                </p>
-              </div>
-              
-              <p className="text-xs text-slate-500">
-                {Number(stock.sentiment_score) >= 6.5
-                  ? "Market shows strong positive sentiment. Investors are optimistic about future performance."
-                  : Number(stock.sentiment_score) >= 5.5
-                  ? "Market shows positive sentiment. Most investors have a favorable outlook."
-                  : Number(stock.sentiment_score) >= 4.5
-                  ? "Market sentiment is neutral. Investors are cautiously optimistic or waiting."
-                  : Number(stock.sentiment_score) >= 3.5
-                  ? "Market shows negative sentiment. Some investor concerns exist."
-                  : "Market shows very negative sentiment. Investors are pessimistic."}
-              </p>
-            </div>
-
-            {/* Data Source */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">Data Source</p>
-              
-              <div className="rounded-xl bg-slate-50 p-4 border border-slate-200">
-                <p className="text-sm font-semibold text-slate-700 mb-2">
-                  {stock.sentiment_source || "Multiple Sources"}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Aggregated from news articles, financial reports, and social media sentiment analysis
-                </p>
-              </div>
-              
-              <p className="mt-4 text-xs text-slate-400">
-                ℹ️ Updated daily with fresh data from financial news feeds and sentiment tracking platforms
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Prediction detail card ── */}
+      {/* Prediction detail card */}
       {hasPrediction && (
         <div className="relative rounded-3xl bg-gradient-to-br from-slate-50 via-white to-slate-50 p-8 shadow-lg ring-1 ring-slate-100 overflow-hidden">
           {/* Decorative accent */}
@@ -464,7 +342,7 @@ export default function StockDetail() {
               }`}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Expected Change</p>
                 <p className={`mt-3 text-2xl font-extrabold ${forecastUp ? "text-emerald-600" : "text-rose-600"}`}>
-                  {forecastUp ? "↑ +" : "↓ "}{Number(stock.expected_change_pct || 0).toFixed(2)}%
+                  {forecastUp ? "+ " : "- "}{Number(stock.expected_change_pct || 0).toFixed(2)}%
                 </p>
                 <p className="mt-1 text-xs text-slate-400">From current price</p>
               </div>
@@ -478,7 +356,7 @@ export default function StockDetail() {
               </div>
               
               <div className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-amber-300 hover:shadow-md">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Model Confidence (R²)</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Model Confidence (R2)</p>
                 <p className="mt-3 text-2xl font-extrabold text-amber-600">
                   {(Number(stock.model_confidence_r2 || 0) * 100).toFixed(1)}%
                 </p>
@@ -512,23 +390,14 @@ export default function StockDetail() {
         </div>
       )}
 
-      {/* ── Opportunity chart ── */}
+      {/* Opportunity chart */}
       <div className="relative rounded-3xl bg-white p-8 shadow-lg ring-1 ring-slate-100 overflow-hidden">
         {/* Subtle accent line at top */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-transparent" />
-        
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Opportunity Graph</h2>
             <p className="mt-0.5 text-xs text-slate-500">1-year daily close · 5-day moving average</p>
-          </div>
-          <div className="flex items-center gap-5 text-xs font-medium">
-            <span className="flex items-center gap-2 text-indigo-600">
-              <span className="h-3 w-3 rounded bg-indigo-500" />Price
-            </span>
-            <span className="flex items-center gap-2 text-emerald-600">
-              <span className="h-3 w-3 rounded bg-emerald-500" />Moving Avg
-            </span>
           </div>
         </div>
 
@@ -577,7 +446,6 @@ export default function StockDetail() {
                 dot={false}
                 strokeDasharray="4 3"
               />
-              {/* Mark current (last) price */}
               {chartData.length > 0 && (
                 <ReferenceLine
                   y={chartData[chartData.length - 1]?.price}
@@ -590,14 +458,13 @@ export default function StockDetail() {
           </ResponsiveContainer>
         </div>
       </div>
-
-      {/* ── Quick actions ── */}
+      {/* Quick actions */}
       <div className="flex flex-wrap gap-4">
         <Link
           to={`/stocks${backQuery}`}
           className="group relative inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-md transition hover:shadow-lg hover:border-slate-400 hover:bg-slate-50"
         >
-          <span className="transition group-hover:-translate-x-0.5">←</span>
+          <span className="transition group-hover:-translate-x-0.5">&larr;</span>
           <span>All Stocks</span>
         </Link>
         <Link
@@ -606,9 +473,11 @@ export default function StockDetail() {
         >
           <span className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 transition group-hover:opacity-100" />
           <span className="relative">Run ML Prediction</span>
-          <span className="relative transition group-hover:translate-x-0.5">→</span>
+          <span className="relative transition group-hover:translate-x-0.5">&rarr;</span>
         </Link>
       </div>
     </section>
   );
 }
+
+

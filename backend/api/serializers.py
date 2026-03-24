@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
@@ -41,6 +43,7 @@ class StockAnalyticsSerializer(serializers.Serializer):
     discount_level = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     opportunity_score = serializers.FloatField(required=False, allow_null=True)
     graph_data = serializers.JSONField(required=False)
+    sentiment_graph_data = serializers.JSONField(required=False)
     last_updated = serializers.DateTimeField(required=False, allow_null=True)
 
 
@@ -256,11 +259,25 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
         return [float(value) for value in prices if isinstance(value, (int, float))]
 
     def get_analytics(self, obj):
+        from pipeline.models import SilverSentimentScore
+
         insight = self._insight(obj)
         fund = self._fundamentals(obj)
         pe_ratio = fund.get("trailing_pe")
         if pe_ratio is None:
             pe_ratio = insight.get("pe_ratio")
+
+        cutoff = date.today() - timedelta(days=180)
+        sentiment_rows = list(
+            SilverSentimentScore.objects
+            .filter(ticker=obj.symbol, date__gte=cutoff)
+            .order_by("date")
+            .values("date", "sentiment_score")
+        )
+        sentiment_graph_data = {
+            "dates": [row["date"].isoformat() for row in sentiment_rows if row.get("date")],
+            "scores": [float(row["sentiment_score"]) for row in sentiment_rows if row.get("sentiment_score") is not None],
+        }
 
         if not insight:
             return {
@@ -269,6 +286,7 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
                 "discount_level": None,
                 "opportunity_score": None,
                 "graph_data": {},
+                "sentiment_graph_data": sentiment_graph_data,
                 "last_updated": None,
             }
         return {
@@ -277,6 +295,7 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
             "discount_level": insight.get("discount_level"),
             "opportunity_score": insight.get("opportunity_score"),
             "graph_data": insight.get("graph_data") or {},
+            "sentiment_graph_data": sentiment_graph_data,
             "last_updated": insight.get("updated_at") or insight.get("date"),
         }
 

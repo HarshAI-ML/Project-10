@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Loader from "../components/Loader";
 import { createPortfolio, fetchPortfolio } from "../api/stocks";
@@ -6,6 +6,20 @@ import { createPortfolio, fetchPortfolio } from "../api/stocks";
 const ACTIVE_PORTFOLIO_KEY = "active_portfolio_id";
 
 const PORTFOLIO_ICONS = ["📊", "📈", "💹", "🏦", "💰", "🌐", "⚡", "🚀"];
+
+const sentimentBadgeClass = (score) => {
+  if (score === null || score === undefined) return "bg-slate-100 text-slate-500";
+  if (Number(score) >= 6.5) return "bg-emerald-100 text-emerald-700";
+  if (Number(score) >= 4.0) return "bg-amber-100 text-amber-700";
+  return "bg-rose-100 text-rose-600";
+};
+
+const sentimentBarClass = (score) => {
+  if (score === null || score === undefined) return "bg-slate-300";
+  if (Number(score) >= 6.5) return "bg-emerald-500";
+  if (Number(score) >= 4.0) return "bg-amber-500";
+  return "bg-rose-500";
+};
 
 export default function Portfolio() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -67,8 +81,6 @@ export default function Portfolio() {
 
   return (
     <section className="space-y-8">
-
-      {/* ── Header ── */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Portfolios</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -76,30 +88,20 @@ export default function Portfolio() {
         </p>
       </div>
 
-      {/* ── Notices ── */}
       {message && (
         <div className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 ring-1 ring-emerald-200">
-          <svg className="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
-          </svg>
           {message}
         </div>
       )}
       {error && (
         <div className="flex items-center gap-3 rounded-xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 ring-1 ring-rose-200">
-          <svg className="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-          </svg>
           {error}
         </div>
       )}
 
-      {/* ── Create form ── */}
       <div className="rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-700 p-1 shadow-lg">
         <div className="rounded-xl bg-white p-6">
-          <h2 className="mb-4 text-sm font-bold uppercase tracking-wide text-slate-500">
-            New Portfolio
-          </h2>
+          <h2 className="mb-4 text-sm font-bold uppercase tracking-wide text-slate-500">New Portfolio</h2>
           <form onSubmit={handleCreate} className="flex flex-col gap-3 sm:flex-row">
             <input
               type="text"
@@ -133,15 +135,15 @@ export default function Portfolio() {
               {creating ? (
                 <>
                   <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                   </svg>
                   Creating…
                 </>
               ) : (
                 <>
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
                   Create
                 </>
@@ -151,7 +153,6 @@ export default function Portfolio() {
         </div>
       </div>
 
-      {/* ── Portfolio grid ── */}
       {loading ? (
         <div className="flex justify-center py-12"><Loader /></div>
       ) : portfolios.length === 0 ? (
@@ -179,7 +180,6 @@ export default function Portfolio() {
                 }
               }}
             >
-              {/* Decorative top bar */}
               <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-gradient-to-r from-indigo-500 to-violet-500" />
 
               <div className="flex items-start gap-4">
@@ -196,6 +196,32 @@ export default function Portfolio() {
                   <p className="mt-0.5 text-xs text-slate-400 line-clamp-2">
                     {portfolio.description || "No description provided"}
                   </p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Portfolio Sentiment</p>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${sentimentBadgeClass(portfolio.sentiment_score)}`}>
+                    {portfolio.sentiment_score !== null && portfolio.sentiment_score !== undefined
+                      ? `${Number(portfolio.sentiment_score).toFixed(2)} (${portfolio.sentiment_label || "Neutral"})`
+                      : "No Data"}
+                  </span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${sentimentBarClass(portfolio.sentiment_score)}`}
+                    style={{ width: `${Math.max(0, Math.min(((Number(portfolio.sentiment_score || 0) / 10) * 100), 100))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Coverage: {portfolio.sentiment_stock_count ?? 0}/{portfolio.stock_count ?? 0} stocks</span>
+                  <span>
+                    Sector Avg: {(portfolio.sector_sentiment_score ?? portfolio.sentiment_score) !== null &&
+                    (portfolio.sector_sentiment_score ?? portfolio.sentiment_score) !== undefined
+                      ? Number(portfolio.sector_sentiment_score ?? portfolio.sentiment_score).toFixed(2)
+                      : "—"}
+                  </span>
                 </div>
               </div>
 

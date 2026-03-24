@@ -27,6 +27,16 @@ python manage.py run_pipeline --mode=news
 python manage.py fetch_fundamentals
 ```
 
+Hourly incremental Bronze ingestion:
+
+```bash
+python manage.py fetch_hourly_incremental
+```
+
+Details:
+
+- See [HOURLY_INCREMENTAL_README.md](/c:/Huzaifa/bizz_python/ML_PROJECTS_GITT/Project-10/docs/HOURLY_INCREMENTAL_README.md)
+
 ## 2) Silver Layer (Processed Price Data)
 
 Primary table:
@@ -154,3 +164,7 @@ python manage.py shell -c "from django.db.models import Count; from pipeline.mod
 - Raw fetched data lands in Bronze.
 - Processed/feature-rich time series lives in Silver.
 - End-user insights and decision outputs are served from Gold.
+
+## Vector DB (for retrieval use cases)
+
+- Setup and usage: [VECTOR_DB_README.md](/c:/Huzaifa/bizz_python/ML_PROJECTS_GITT/Project-10/docs/VECTOR_DB_README.md)

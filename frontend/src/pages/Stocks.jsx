@@ -24,6 +24,19 @@ const CustomBarTooltip = ({ active, payload, label }) => {
   );
 };
 
+const CustomSentimentTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  const value = Number(payload[0].value);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur text-sm">
+      <p className="font-mono font-bold text-slate-900">{label}</p>
+      <p className="mt-1 text-slate-500">
+        Sentiment Score: <span className="font-bold text-amber-700">{value.toFixed(2)}/10</span>
+      </p>
+    </div>
+  );
+};
+
 export default function Stocks() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -40,6 +53,7 @@ export default function Stocks() {
   const [tableLoading, setTableLoading] = useState(false);
   const [error, setError] = useState("");
   const [openingClusters, setOpeningClusters] = useState(false);
+  const [chartMode, setChartMode] = useState("pe");
 
   const selectedPortfolio = useMemo(
     () => portfolios.find((p) => String(p.id) === String(portfolioId)) || null,
@@ -47,6 +61,16 @@ export default function Stocks() {
   );
   const peChartData = useMemo(
     () => stocks.map((s) => ({ symbol: s.symbol, pe_ratio: Number(s.pe_ratio || 0) })),
+    [stocks]
+  );
+  const sentimentChartData = useMemo(
+    () =>
+      stocks
+        .filter((s) => s.sentiment_score !== null && s.sentiment_score !== undefined)
+        .map((s) => ({
+          symbol: s.symbol,
+          sentiment_score: Number(s.sentiment_score),
+        })),
     [stocks]
   );
   const portfolioSymbols = useMemo(
@@ -280,24 +304,84 @@ export default function Stocks() {
                 deletingStockId={deletingStockId}
               />
 
-              {/* PE bar chart */}
               <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
-                <h2 className="text-sm font-bold text-slate-700">PE Ratio Comparison</h2>
-                <p className="mb-4 mt-0.5 text-xs text-slate-400">Trailing / forward PE across your holdings</p>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-700">
+                      {chartMode === "pe" ? "PE Ratio Comparison" : "Sentiment Score Comparison"}
+                    </h2>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {chartMode === "pe"
+                        ? "Trailing / forward PE across your holdings"
+                        : "AI sentiment score by stock (range: 0 to 10)"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setChartMode("pe")}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        chartMode === "pe" ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      PE Graph
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChartMode("sentiment")}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        chartMode === "sentiment" ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      Sentiment Graph
+                    </button>
+                  </div>
+                </div>
                 <div className="h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={peChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="symbol" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-                      <Tooltip content={<CustomBarTooltip />} />
-                      <Bar dataKey="pe_ratio" radius={[6, 6, 0, 0]} name="PE Ratio">
-                        {peChartData.map((_, i) => (
-                          <Cell key={i} fill={`hsl(${240 + i * 18}, 70%, ${55 + (i % 3) * 5}%)`} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {chartMode === "pe" ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={peChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="symbol" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                        <Tooltip content={<CustomBarTooltip />} />
+                        <Bar dataKey="pe_ratio" radius={[6, 6, 0, 0]} name="PE Ratio">
+                          {peChartData.map((_, i) => (
+                            <Cell key={i} fill={`hsl(${240 + i * 18}, 70%, ${55 + (i % 3) * 5}%)`} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <>
+                      {sentimentChartData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={sentimentChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                            <XAxis dataKey="symbol" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                            <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} domain={[0, 10]} />
+                            <Tooltip content={<CustomSentimentTooltip />} />
+                            <Bar dataKey="sentiment_score" radius={[6, 6, 0, 0]} name="Sentiment Score">
+                              {sentimentChartData.map((row, i) => {
+                                const score = Number(row.sentiment_score);
+                                const fill =
+                                  score >= 6.5
+                                    ? "#10b981"
+                                    : score >= 4.0
+                                    ? "#f59e0b"
+                                    : "#ef4444";
+                                return <Cell key={i} fill={fill} />;
+                              })}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
+                          No sentiment data available for this portfolio yet.
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </>

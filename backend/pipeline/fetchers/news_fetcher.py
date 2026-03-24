@@ -3,6 +3,7 @@ import hashlib
 import xml.etree.ElementTree as ET
 import logging
 import time
+import requests
 from pipeline.models import BronzeNewsArticle
 
 logger = logging.getLogger(__name__)
