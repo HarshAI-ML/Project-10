@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from hashlib import sha1
 from typing import Any
 
@@ -15,12 +16,14 @@ from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 from analytics.data_access import get_multiple_stocks_history
-from portfolio.models import Stock
+from django.db.models import F
+from pipeline.models import SilverCleanedPrice
+from portfolio.models import PortfolioStock, Stock
 
 
 MIN_STOCKS = 5
-MIN_HISTORY_POINTS = 220
-HISTORY_VALID_RATIO = 0.70
+MIN_HISTORY_POINTS = 60   # lowered: need at least 60 trading days (~3 months)
+HISTORY_VALID_RATIO = 0.30  # lowered: keep columns with ≥30% non-null
 YF_CACHE_TTL = 60 * 60 * 6
 FEATURE_CACHE_TTL = 60 * 30
 RESULT_CACHE_TTL = 60 * 30
@@ -60,14 +63,15 @@ def _history_cache_key(tickers: list[str]) -> str:
     return f"cluster:history:{CACHE_VERSION}:{digest}"
 
 
-def _feature_cache_key(portfolio_id: int, tickers: list[str]) -> str:
+def _feature_cache_key(entity_id: str, tickers: list[str]) -> str:
     digest = sha1(",".join(sorted(tickers)).encode("utf-8")).hexdigest()
-    return f"cluster:features:{CACHE_VERSION}:{portfolio_id}:{digest}"
+    return f"cluster:features:{CACHE_VERSION}:{entity_id}:{digest}"
 
 
-def _result_cache_key(portfolio_id: int, tickers: list[str]) -> str:
+def _result_cache_key(entity_id: str, tickers: list[str], n_clusters: int | None = None) -> str:
     digest = sha1(",".join(sorted(tickers)).encode("utf-8")).hexdigest()
-    return f"cluster:result:{CACHE_VERSION}:{portfolio_id}:{digest}"
+    k = f":{n_clusters}" if n_clusters else ""
+    return f"cluster:result:{CACHE_VERSION}:{entity_id}{k}:{digest}"
 
 
 def _to_prices(data: pd.DataFrame) -> pd.DataFrame:
@@ -95,29 +99,43 @@ def _download_prices(tickers: list[str]) -> pd.DataFrame:
     if cached is not None:
         return cached
 
-    # Fetch from BronzeStockPrice (DB-only, no yfinance)
-    histories = get_multiple_stocks_history(tickers, days=3 * 365)
+    # Prefer SilverCleanedPrice (populated already) for clustering data.
+    cutoff = date.today() - timedelta(days=3 * 365)
+    qs = (
+        SilverCleanedPrice.objects
+        .filter(ticker__in=[t.upper() for t in tickers], date__gte=cutoff)
+        .values('ticker', 'date', 'close')
+    )
 
-    # Build a wide DataFrame: index=date, columns=ticker, values=close
-    frames = {}
-    for ticker, df in histories.items():
-        if not df.empty and 'close' in df.columns:
-            s = df.set_index('date')['close'].rename(ticker.upper())
-            frames[ticker.upper()] = s
+    if qs.exists():
+        df = pd.DataFrame(list(qs))
+        if df.empty:
+            prices = pd.DataFrame()
+        else:
+            df['date'] = pd.to_datetime(df['date'])
+            prices = df.pivot(index='date', columns='ticker', values='close')
+            prices.columns = [str(c).upper() for c in prices.columns]
+    else:
+        # Fallback to Bronze history where available
+        histories = get_multiple_stocks_history(tickers, days=3 * 365)
+        frames = {}
+        for ticker, df in histories.items():
+            if not df.empty and 'close' in df.columns:
+                s = df.set_index('date')['close'].rename(ticker.upper())
+                if s.index.duplicated().any():
+                    s = s[~s.index.duplicated(keep='last')]
+                frames[ticker.upper()] = s
+        prices = pd.DataFrame(frames)
 
-    if not frames:
-        prices = pd.DataFrame()
-        cache.set(cache_key, prices, YF_CACHE_TTL)
-        return prices
+    if prices.empty:
+        cache.set(cache_key, pd.DataFrame(), YF_CACHE_TTL)
+        return pd.DataFrame()
 
-    prices = pd.DataFrame(frames)
-    prices.index = pd.to_datetime(prices.index)
     prices = prices.sort_index()
-
+    prices = prices.ffill(limit=3)
     min_non_null = max(int(len(prices.index) * HISTORY_VALID_RATIO), MIN_HISTORY_POINTS)
     prices = prices.dropna(axis=1, thresh=min_non_null)
-    prices = prices.ffill(limit=3)
-    prices = prices.dropna(how="all")
+    prices = prices.dropna(how='all')
 
     cache.set(cache_key, prices, YF_CACHE_TTL)
     return prices
@@ -177,19 +195,26 @@ def _build_feature_frame(prices: pd.DataFrame) -> pd.DataFrame:
             continue
 
         returns = p.pct_change().dropna()
-        if len(returns) < 60:
+        if len(returns) < 20:
             continue
 
-        ma50 = p.rolling(50).mean()
-        ma200 = p.rolling(200).mean()
+        # Use min_periods so shorter series still produce valid MAs
+        ma50 = p.rolling(50, min_periods=20).mean()
+        ma200 = p.rolling(200, min_periods=60).mean()
         ma50_last = ma50.iloc[-1]
         ma200_last = ma200.iloc[-1]
         if pd.isna(ma50_last) or pd.isna(ma200_last) or ma50_last == 0 or ma200_last == 0:
             continue
 
-        rolling_52w_high = p.rolling(252).max().iloc[-1]
+        # 52-week high: use whatever window is available (min 60 days)
+        available_window = min(252, len(p))
+        rolling_52w_high = p.rolling(available_window, min_periods=20).max().iloc[-1]
         if pd.isna(rolling_52w_high) or rolling_52w_high == 0:
             continue
+
+        # Momentum: use 60-day if available, else use all available returns
+        momentum_window = min(60, len(p) - 1)
+        momentum_val = p.pct_change(momentum_window).iloc[-1] if momentum_window > 0 else 0.0
 
         price_last = p.iloc[-1]
         rsi = _compute_rsi(p, window=14)
@@ -198,7 +223,7 @@ def _build_feature_frame(prices: pd.DataFrame) -> pd.DataFrame:
 
         row = {
             "stock": str(symbol).upper(),
-            "momentum": float(p.pct_change(60).iloc[-1]),
+            "momentum": float(momentum_val),
             "volatility": float(returns.std()),
             "dist_ma50": float((price_last - ma50_last) / ma50_last),
             "dist_ma200": float((price_last - ma200_last) / ma200_last),
@@ -305,14 +330,11 @@ def _assign_cluster_names(raw_with_cluster: pd.DataFrame) -> dict[int, str]:
     return mapping
 
 
-def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
+def _run_clustering(entity_id: str, tickers: list[str], n_clusters: int | None = None) -> dict[str, Any]:
     try:
-        rows = list(Stock.objects.filter(portfolio_id=portfolio_id).order_by("symbol").values("symbol"))
-        tickers = [str(row["symbol"]).upper() for row in rows]
-
         if len(tickers) < MIN_STOCKS:
             return {
-                "portfolio_id": portfolio_id,
+                "portfolio_id": entity_id,
                 "status": "insufficient_data",
                 "detail": "Portfolio needs at least 5 stocks for clustering.",
                 "stocks": tickers,
@@ -326,7 +348,7 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
                 "cluster_summary": [],
             }
 
-        result_key = _result_cache_key(portfolio_id, tickers)
+        result_key = _result_cache_key(entity_id, tickers, n_clusters)
         cached = cache.get(result_key)
         if cached is not None:
             return cached
@@ -334,7 +356,7 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
         prices = _download_prices(tickers)
         if prices.empty or prices.shape[1] < MIN_STOCKS:
             payload = {
-                "portfolio_id": portfolio_id,
+                "portfolio_id": entity_id,
                 "status": "insufficient_data",
                 "detail": (
                     f"Not enough valid stock price series after cleaning "
@@ -353,7 +375,7 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
             cache.set(result_key, payload, RESULT_CACHE_TTL)
             return payload
 
-        feature_key = _feature_cache_key(portfolio_id, list(prices.columns))
+        feature_key = _feature_cache_key(entity_id, list(prices.columns))
         feature_cached = cache.get(feature_key)
         if feature_cached is None:
             features_raw = _build_feature_frame(prices)
@@ -363,7 +385,7 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
 
         if features_raw.empty or len(features_raw) < MIN_STOCKS:
             payload = {
-                "portfolio_id": portfolio_id,
+                "portfolio_id": entity_id,
                 "status": "insufficient_data",
                 "detail": "Insufficient historical data for factor computation.",
                 "stocks": features_raw["stock"].tolist() if not features_raw.empty else [],
@@ -383,12 +405,25 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
         scaler = StandardScaler()
         x_scaled = scaler.fit_transform(norm_df[FEATURE_COLUMNS])
 
-        reducer = umap.UMAP(n_neighbors=10, min_dist=0.2, random_state=42)
-        embedding = reducer.fit_transform(x_scaled)
+        if umap is not None:
+            reducer = umap.UMAP(n_neighbors=min(10, len(raw_df) - 1), min_dist=0.2, random_state=42)
+            embedding = reducer.fit_transform(x_scaled)
+        else:
+            # umap-learn not installed — fall back to PCA (always available)
+            from sklearn.decomposition import PCA
+            n_components = min(2, x_scaled.shape[0], x_scaled.shape[1])
+            embedding = PCA(n_components=n_components, random_state=42).fit_transform(x_scaled)
+            # Pad to 2 columns if PCA only returned 1
+            if embedding.shape[1] < 2:
+                import numpy as _np
+                embedding = _np.hstack([embedding, _np.zeros((embedding.shape[0], 1))])
 
-        best_k = _choose_kmeans_k(embedding)
-        if best_k <= 1:
-            best_k = min(2, len(raw_df))
+        if n_clusters is not None and n_clusters > 1:
+            best_k = min(n_clusters, len(raw_df))
+        else:
+            best_k = _choose_kmeans_k(embedding)
+            if best_k <= 1:
+                best_k = min(2, len(raw_df))
 
         kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10)
         clusters = kmeans.fit_predict(embedding)
@@ -463,7 +498,7 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
         top_opportunities = opportunity_scores[:10]
 
         payload = {
-            "portfolio_id": portfolio_id,
+            "portfolio_id": entity_id,
             "status": "ok",
             "detail": "Multi-factor clustering completed.",
             "stocks": [str(v) for v in raw_df["stock"].tolist()],
@@ -495,7 +530,7 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
         return payload
     except Exception as exc:
         return {
-            "portfolio_id": portfolio_id,
+            "portfolio_id": entity_id,
             "status": "error",
             "detail": f"Failed to generate clustering analysis: {exc}",
             "stocks": [],
@@ -508,3 +543,22 @@ def build_portfolio_clusters(portfolio_id: int) -> dict[str, Any]:
             "top_opportunities": [],
             "cluster_summary": [],
         }
+
+
+def build_portfolio_clusters(portfolio_id: int, n_clusters: int | None = None) -> dict[str, Any]:
+    rows = list(Stock.objects.filter(portfolio_id=portfolio_id).order_by("symbol").values("symbol"))
+    if not rows:
+        rows = list(
+            PortfolioStock.objects.filter(portfolio_id=portfolio_id)
+            .order_by("ticker")
+            .annotate(symbol=F('ticker'))
+            .values("symbol")
+        )
+    tickers = [str(row["symbol"]).upper() for row in rows]
+    return _run_clustering(str(portfolio_id), tickers, n_clusters)
+
+
+def build_global_clusters(n_clusters: int | None = None) -> dict[str, Any]:
+    tickers = list(SilverCleanedPrice.objects.values_list("ticker", flat=True).distinct())
+    tickers = [str(t).upper() for t in tickers]
+    return _run_clustering("global", tickers, n_clusters)

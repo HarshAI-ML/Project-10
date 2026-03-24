@@ -27,7 +27,7 @@ from analytics.data_access import (
 )
 from analytics.models import StockAnalytics
 from analytics.services.pipeline import generate_and_persist_stock_analytics
-from analytics.services.cluster import build_portfolio_clusters
+from analytics.services.cluster import build_portfolio_clusters, build_global_clusters
 from analytics.services.price_prediction import get_prediction_options, run_prediction
 from analytics.services.prediction import refresh_stock_prediction
 from analytics.services.yahoo_search import (
@@ -195,8 +195,15 @@ class PortfolioViewSet(
     @action(detail=True, methods=["get"], url_path="clusters")
     def clusters(self, request, pk=None):
         portfolio = self.get_object()
+        n_clusters_param = request.query_params.get("n_clusters")
+        n_clusters = None
+        if n_clusters_param:
+            try:
+                n_clusters = int(n_clusters_param)
+            except ValueError:
+                pass
         try:
-            payload = build_portfolio_clusters(portfolio_id=portfolio.id)
+            payload = build_portfolio_clusters(portfolio_id=portfolio.id, n_clusters=n_clusters)
             if payload["status"] != "ok":
                 return Response(payload, status=status.HTTP_200_OK)
             return Response(payload)
@@ -305,6 +312,34 @@ class StockViewSet(viewsets.ReadOnlyModelViewSet):
         stock = self.get_object()
         stock.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=["get"], url_path="clusters")
+    def clusters(self, request):
+        """Global clustering of all stocks across all portfolios."""
+        n_clusters_param = request.query_params.get("n_clusters")
+        n_clusters = None
+        if n_clusters_param:
+            try:
+                n_clusters = int(n_clusters_param)
+            except ValueError:
+                pass
+        try:
+            payload = build_global_clusters(n_clusters=n_clusters)
+            if payload["status"] != "ok":
+                return Response(payload, status=status.HTTP_200_OK)
+            return Response(payload)
+        except Exception:
+            return Response(
+                {
+                    "portfolio_id": "global",
+                    "status": "error",
+                    "detail": "Failed to generate global clustering analysis.",
+                    "rows": [],
+                    "cluster_summary": [],
+                    "centroids": [],
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
 
 class PredictionViewSet(viewsets.GenericViewSet):

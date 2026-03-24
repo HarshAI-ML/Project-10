@@ -106,3 +106,13 @@ export const fetchPortfolioClusters = async (portfolioId, nClusters = 3) => {
   });
   return data;
 };
+
+export const fetchGlobalClusters = async (nClusters = 3) => {
+  const queryParams = new URLSearchParams({
+    n_clusters: String(nClusters),
+  });
+  const { data } = await api.get(`stocks/clusters/?${queryParams.toString()}`, {
+    timeout: 120000,
+  });
+  return data;
+};

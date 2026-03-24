@@ -21,7 +21,7 @@ export default function Navbar() {
 
   const activePortfolioId = sessionStorage.getItem(ACTIVE_PORTFOLIO_KEY);
   const stocksPath   = activePortfolioId ? `/stocks?portfolio=${activePortfolioId}` : "/portfolio?notice=select-portfolio";
-  const clustersPath = activePortfolioId ? `/portfolio/${activePortfolioId}/clusters` : "/portfolio?notice=select-portfolio";
+  const clustersPath = "/clusters";
 
   const resolvedPath = (key) => {
     if (key === "stocks")   return stocksPath;

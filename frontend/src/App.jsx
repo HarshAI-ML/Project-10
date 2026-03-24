@@ -42,6 +42,14 @@ export default function App() {
               }
             />
             <Route
+              path="/clusters"
+              element={
+                <ProtectedRoute>
+                  <PortfolioClusters />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/stocks"
               element={
                 <ProtectedRoute>

@@ -5,7 +5,7 @@ import {
   Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
 import Loader from "../components/Loader";
-import { fetchPortfolio, fetchPortfolioClusters } from "../api/stocks";
+import { fetchPortfolio, fetchPortfolioClusters, fetchGlobalClusters } from "../api/stocks";
 
 const ACTIVE_PORTFOLIO_KEY = "active_portfolio_id";
 
@@ -63,6 +63,9 @@ export default function PortfolioClusters() {
   const [searchParams] = useSearchParams();
   const { id: routeId } = useParams();
   const navigate = useNavigate();
+
+  // If no :id in route we are in global mode (all 400 stocks)
+  const isGlobal = !routeId;
   const portfolioId = routeId || searchParams.get("portfolio") || sessionStorage.getItem(ACTIVE_PORTFOLIO_KEY);
 
   const [loading, setLoading] = useState(true);
@@ -70,7 +73,7 @@ export default function PortfolioClusters() {
   const [message, setMessage] = useState("");
   const [portfolios, setPortfolios] = useState([]);
   const [clusterData, setClusterData] = useState(null);
-  const [loadingStep, setLoadingStep] = useState("Analyzing portfolio…");
+  const [loadingStep, setLoadingStep] = useState("Analyzing stocks…");
 
   const selectedPortfolio = useMemo(
     () => portfolios.find((p) => String(p.id) === String(portfolioId)) || null,
@@ -78,31 +81,50 @@ export default function PortfolioClusters() {
   );
 
   useEffect(() => {
-    if (!portfolioId) { navigate("/portfolio?notice=select-portfolio", { replace: true }); return; }
-    const steps = ["Analyzing portfolio…", "Computing factors…", "Generating clusters…"];
+    const steps = ["Analyzing stocks…", "Computing factors…", "Generating clusters…"];
     let i = 0;
     const timer = window.setInterval(() => { i = (i + 1) % steps.length; setLoadingStep(steps[i]); }, 900);
     setLoading(true); setError(""); setMessage("");
-    Promise.all([fetchPortfolio(), fetchPortfolioClusters(portfolioId, 4)])
-      .then(([pRows, clusters]) => {
-        const pArr = Array.isArray(pRows) ? pRows : [];
-        if (!pArr.some((p) => String(p.id) === String(portfolioId))) {
-          navigate("/portfolio?notice=select-portfolio", { replace: true }); return;
-        }
-        sessionStorage.setItem(ACTIVE_PORTFOLIO_KEY, String(portfolioId));
-        setPortfolios(pArr);
-        setClusterData(clusters);
-        if (clusters?.status !== "ok") setMessage(clusters?.detail || "Clustering analysis unavailable.");
-      })
-      .catch((err) =>
-        setError(
-          err?.code === "ECONNABORTED"
-            ? "Clustering is taking longer than expected. Please try again."
-            : err?.response?.data?.detail || "Failed to load clustering analysis."
+
+    if (isGlobal) {
+      // Global mode: cluster all 400 stocks from StockMaster
+      fetchGlobalClusters(4)
+        .then((clusters) => {
+          setClusterData(clusters);
+          if (clusters?.status !== "ok") setMessage(clusters?.detail || "Clustering analysis unavailable.");
+        })
+        .catch((err) =>
+          setError(
+            err?.code === "ECONNABORTED"
+              ? "Clustering is taking longer than expected. Please try again."
+              : err?.response?.data?.detail || "Failed to load clustering analysis."
+          )
         )
-      )
-      .finally(() => { window.clearInterval(timer); setLoading(false); });
-  }, [navigate, portfolioId]);
+        .finally(() => { window.clearInterval(timer); setLoading(false); });
+    } else {
+      // Portfolio mode: cluster stocks in a specific portfolio
+      if (!portfolioId) { navigate("/portfolio?notice=select-portfolio", { replace: true }); window.clearInterval(timer); setLoading(false); return; }
+      Promise.all([fetchPortfolio(), fetchPortfolioClusters(portfolioId, 4)])
+        .then(([pRows, clusters]) => {
+          const pArr = Array.isArray(pRows) ? pRows : [];
+          if (!pArr.some((p) => String(p.id) === String(portfolioId))) {
+            navigate("/portfolio?notice=select-portfolio", { replace: true }); return;
+          }
+          sessionStorage.setItem(ACTIVE_PORTFOLIO_KEY, String(portfolioId));
+          setPortfolios(pArr);
+          setClusterData(clusters);
+          if (clusters?.status !== "ok") setMessage(clusters?.detail || "Clustering analysis unavailable.");
+        })
+        .catch((err) =>
+          setError(
+            err?.code === "ECONNABORTED"
+              ? "Clustering is taking longer than expected. Please try again."
+              : err?.response?.data?.detail || "Failed to load clustering analysis."
+          )
+        )
+        .finally(() => { window.clearInterval(timer); setLoading(false); });
+    }
+  }, [isGlobal, navigate, portfolioId]);
 
   const scatterGroups = useMemo(() => {
     const map = new Map();
@@ -151,7 +173,7 @@ export default function PortfolioClusters() {
         <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-              {selectedPortfolio?.name || "Portfolio"}
+              {isGlobal ? "All 400 Stocks" : (selectedPortfolio?.name || "Portfolio")}
             </p>
             <h1 className="mt-1 text-3xl font-extrabold">Clustering Analysis</h1>
             <p className="mt-1 text-sm text-slate-400">
@@ -159,12 +181,14 @@ export default function PortfolioClusters() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              to={`/stocks?portfolio=${portfolioId}`}
-              className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
-            >
-              ← Stocks
-            </Link>
+            {!isGlobal && (
+              <Link
+                to={`/stocks?portfolio=${portfolioId}`}
+                className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
+              >
+                ← Stocks
+              </Link>
+            )}
             <Link
               to="/portfolio"
               className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/20"
