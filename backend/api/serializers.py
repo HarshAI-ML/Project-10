@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from analytics.models import StockAnalytics
+from analytics.data_access import get_latest_insights_bulk
 from portfolio.models import Portfolio, Stock, PortfolioStock
 
 
@@ -32,24 +32,45 @@ class AddStockToPortfolioSerializer(serializers.Serializer):
     symbol = serializers.CharField(max_length=30)
 
 
-class StockAnalyticsSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = StockAnalytics
-        fields = (
-            "pe_ratio",
-            "discount_level",
-            "opportunity_score",
-            "graph_data",
-            "last_updated",
-        )
+class StockAnalyticsSerializer(serializers.Serializer):
+    pe_ratio = serializers.FloatField(required=False, allow_null=True)
+    discount_level = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    opportunity_score = serializers.FloatField(required=False, allow_null=True)
+    graph_data = serializers.JSONField(required=False)
+    last_updated = serializers.DateTimeField(required=False, allow_null=True)
 
 
-class StockListSerializer(serializers.ModelSerializer):
-    pe_ratio = serializers.FloatField(source="analytics.pe_ratio", read_only=True)
-    discount_level = serializers.CharField(
-        source="analytics.discount_level",
-        read_only=True,
-    )
+class GoldInsightMixin:
+    def _insight_map(self):
+        if hasattr(self, "_cached_insight_map"):
+            return self._cached_insight_map
+
+        instance = getattr(self, "instance", None)
+        tickers = set()
+
+        if instance is None:
+            self._cached_insight_map = {}
+            return self._cached_insight_map
+
+        if isinstance(instance, (list, tuple)):
+            tickers = {obj.symbol for obj in instance if getattr(obj, "symbol", None)}
+        elif hasattr(instance, "__iter__") and not isinstance(instance, Stock):
+            tickers = {obj.symbol for obj in instance if getattr(obj, "symbol", None)}
+        else:
+            symbol = getattr(instance, "symbol", None)
+            if symbol:
+                tickers = {symbol}
+
+        self._cached_insight_map = get_latest_insights_bulk(list(tickers)) if tickers else {}
+        return self._cached_insight_map
+
+    def _insight(self, obj):
+        return self._insight_map().get(obj.symbol, {})
+
+
+class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
+    pe_ratio = serializers.SerializerMethodField()
+    discount_level = serializers.SerializerMethodField()
     min_price = serializers.SerializerMethodField()
     max_price = serializers.SerializerMethodField()
     closing_price = serializers.SerializerMethodField()
@@ -83,11 +104,15 @@ class StockListSerializer(serializers.ModelSerializer):
         )
 
     def _price_series(self, obj):
-        analytics = getattr(obj, "analytics", None)
-        if not analytics:
-            return []
-        prices = analytics.graph_data.get("price", [])
+        insight = self._insight(obj)
+        prices = (insight.get("graph_data") or {}).get("price", [])
         return [float(value) for value in prices if isinstance(value, (int, float))]
+
+    def get_pe_ratio(self, obj):
+        return self._insight(obj).get("pe_ratio")
+
+    def get_discount_level(self, obj):
+        return self._insight(obj).get("discount_level")
 
     def get_min_price(self, obj):
         prices = self._price_series(obj)
@@ -110,8 +135,8 @@ class StockListSerializer(serializers.ModelSerializer):
     def get_currency(self, obj):
         return _infer_currency_from_symbol(obj.symbol)
 
-class StockDetailSerializer(serializers.ModelSerializer):
-    analytics = StockAnalyticsSerializer(read_only=True)
+class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
+    analytics = serializers.SerializerMethodField()
     portfolio_name = serializers.CharField(source="portfolio.name", read_only=True)
     min_price = serializers.SerializerMethodField()
     max_price = serializers.SerializerMethodField()
@@ -148,11 +173,27 @@ class StockDetailSerializer(serializers.ModelSerializer):
         )
 
     def _price_series(self, obj):
-        analytics = getattr(obj, "analytics", None)
-        if not analytics:
-            return []
-        prices = analytics.graph_data.get("price", [])
+        insight = self._insight(obj)
+        prices = (insight.get("graph_data") or {}).get("price", [])
         return [float(value) for value in prices if isinstance(value, (int, float))]
+
+    def get_analytics(self, obj):
+        insight = self._insight(obj)
+        if not insight:
+            return {
+                "pe_ratio": None,
+                "discount_level": None,
+                "opportunity_score": None,
+                "graph_data": {},
+                "last_updated": None,
+            }
+        return {
+            "pe_ratio": insight.get("pe_ratio"),
+            "discount_level": insight.get("discount_level"),
+            "opportunity_score": insight.get("opportunity_score"),
+            "graph_data": insight.get("graph_data") or {},
+            "last_updated": insight.get("updated_at") or insight.get("date"),
+        }
 
     def get_min_price(self, obj):
         prices = self._price_series(obj)

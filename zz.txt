@@ -1,0 +1,15 @@
+ssh -N -L 5433:localhost:5432 -i "c:\Huzaifa\bizz_python\ML_PROJECTS_GITT\autoinvest_pem_pem\auto-invest-vm_key.pem" azureuser@98.70.29.114
+
+
+
+Likely unnecessary/redundant (candidate to remove)
+
+backend/quick_populate.py
+backend/populate_forecasts.py
+backend/fix_analytics.py
+backend/portfolio/management/commands/fetch_prices.py
+backend/portfolio/management/commands/sync_prices.py
+backend/portfolio/management/commands/complete_data.py
+backend/portfolio/management/commands/populate_prices.py
+backend/portfolio/management/commands/setup_all_data.py
+Reason they’re redundant: they directly fetch with yfinance or write Silver/legacy StockAnalytics outside the medallion pipeline.

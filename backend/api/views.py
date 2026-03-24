@@ -20,12 +20,12 @@ from api.serializers import (
 from analytics.data_access import (
     get_fundamentals_bulk,
     get_latest_forecasts_bulk,
+    get_latest_insights_bulk,
     get_latest_price,
     get_latest_signals_bulk,
     get_stock_info,
     search_stocks,
 )
-from analytics.models import StockAnalytics
 from analytics.services.pipeline import generate_and_persist_stock_analytics
 from analytics.services.cluster import build_portfolio_clusters, build_global_clusters
 from analytics.services.price_prediction import get_prediction_options, run_prediction
@@ -224,7 +224,7 @@ class PortfolioViewSet(
 class StockViewSet(viewsets.ReadOnlyModelViewSet):
     """Stock list, detail and search endpoints."""
 
-    queryset = Stock.objects.all().select_related("analytics", "portfolio").order_by("id")
+    queryset = Stock.objects.all().select_related("portfolio").order_by("id")
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -432,10 +432,9 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
         old_stock_map = {s.symbol: s for s in old_stocks}
 
         try:
-            analytics = StockAnalytics.objects.filter(stock__symbol__in=tickers).select_related("stock")
-            analytics_map = {a.stock.symbol: a for a in analytics}
+            insight_map = get_latest_insights_bulk(tickers)
         except Exception:
-            analytics_map = {}
+            insight_map = {}
 
         results = []
         for ps in qs:
@@ -444,7 +443,7 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                 silver = silver_map.get(ticker, {})
                 rng = range_map.get(ticker, {})
                 old = old_stock_map.get(ticker)
-                ana = analytics_map.get(ticker)
+                insight = insight_map.get(ticker, {})
                 fund = fund_map.get(ticker, {})
                 signal_data = signal_map.get(ticker, {})
                 forecast_data = forecast_map.get(ticker, {})
@@ -484,7 +483,7 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "beta": fund.get("beta"),
                         "eps_trailing": fund.get("eps_trailing"),
                         "return_on_equity": fund.get("return_on_equity"),
-                        "discount_level": ana.discount_level if ana else None,
+                        "discount_level": insight.get("discount_level"),
                         "rsi_14": signal_data.get("rsi_14") or silver.get("rsi_14"),
                         "ma_20": silver.get("ma_20"),
                         "macd": silver.get("macd"),

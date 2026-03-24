@@ -447,3 +447,58 @@ def get_latest_forecasts_bulk(tickers: list) -> dict:
             results[entry["ticker"]] = dict(row)
 
     return results
+
+
+def get_latest_insight(ticker: str) -> dict:
+    """Get latest GoldStockInsight for a ticker."""
+    from pipeline.models import GoldStockInsight
+
+    row = (
+        GoldStockInsight.objects
+        .filter(ticker=ticker)
+        .order_by("-date")
+        .values(
+            "ticker",
+            "date",
+            "pe_ratio",
+            "discount_level",
+            "opportunity_score",
+            "graph_data",
+            "updated_at",
+        )
+        .first()
+    )
+    return dict(row) if row else {}
+
+
+def get_latest_insights_bulk(tickers: list) -> dict:
+    """Get latest GoldStockInsight for multiple tickers in one query."""
+    from django.db.models import Max
+    from pipeline.models import GoldStockInsight
+
+    latest_dates = (
+        GoldStockInsight.objects
+        .filter(ticker__in=tickers)
+        .values("ticker")
+        .annotate(max_date=Max("date"))
+    )
+
+    results = {}
+    for entry in latest_dates:
+        row = (
+            GoldStockInsight.objects
+            .filter(ticker=entry["ticker"], date=entry["max_date"])
+            .values(
+                "date",
+                "pe_ratio",
+                "discount_level",
+                "opportunity_score",
+                "graph_data",
+                "updated_at",
+            )
+            .first()
+        )
+        if row:
+            results[entry["ticker"]] = dict(row)
+
+    return results

@@ -8,6 +8,7 @@ from analytics.services.fetch_data import fetch_data
 from analytics.services.indicators import indicators
 from analytics.services.opportunity_engine import opportunity_engine
 from analytics.services.plot_data import plot_data
+from pipeline.models import GoldStockInsight
 from portfolio.models import Stock
 
 
@@ -25,6 +26,22 @@ def generate_and_persist_stock_analytics(stock: Stock) -> StockAnalytics:
     )
     graph_json = plot_data(cleaned_df)
 
+    insight_date = cleaned_df[-1]["date"] if cleaned_df else timezone.now().date()
+
+    # Primary write path: Gold medallion table for insights.
+    GoldStockInsight.objects.update_or_create(
+        ticker=stock.symbol,
+        date=insight_date,
+        defaults={
+            "pe_ratio": indicator_data["pe_ratio"],
+            "discount_level": indicator_data["discount_level"],
+            "opportunity_score": score,
+            "graph_data": graph_json,
+        },
+    )
+
+    # Backward-compatibility mirror: keep legacy table in sync so existing
+    # serializers/endpoints that still reference Stock.analytics keep working.
     analytics, _ = StockAnalytics.objects.update_or_create(
         stock=stock,
         defaults={

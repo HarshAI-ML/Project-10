@@ -265,3 +265,27 @@ class GoldForecastResult(models.Model):
 
     def __str__(self):
         return f"{self.ticker} | {self.forecast_date} | {self.predicted_price:.2f} ({self.model_type})"
+
+
+class GoldStockInsight(models.Model):
+    """
+    High-level analytics insights for a stock.
+    Produced by analytics pipeline and stored in Gold for serving/UI.
+    """
+
+    ticker = models.CharField(max_length=30, db_index=True)
+    date = models.DateField(db_index=True)
+    pe_ratio = models.FloatField(default=0.0)
+    discount_level = models.CharField(max_length=50, default="UNKNOWN")
+    opportunity_score = models.FloatField(default=0.0)
+    graph_data = models.JSONField(default=dict)
+    computed_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [["ticker", "date"]]
+        ordering = ["-date"]
+        indexes = [models.Index(fields=["ticker", "date"])]
+
+    def __str__(self):
+        return f"{self.ticker} | {self.date} | {self.discount_level} | {self.opportunity_score}"

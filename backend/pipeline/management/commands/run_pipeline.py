@@ -9,6 +9,7 @@ from pipeline.fetchers.yfinance_fetcher import YFinanceBatchFetcher
 from pipeline.models import PipelineRun
 from pipeline.processors.cleaner import process_all_tickers
 from pipeline.processors.forecaster import predict_all_tickers
+from pipeline.processors.insights import compute_insights_all
 from pipeline.processors.signals import compute_signals_all
 from scripts.nifty500_top200 import ALL_STOCKS
 
@@ -59,21 +60,28 @@ class Command(BaseCommand):
         )
 
     def _run_gold(self, run):
-        self.stdout.write("\n[Gold] Computing signals + forecasts...")
+        self.stdout.write("\n[Gold] Computing signals + forecasts + insights...")
 
-        self.stdout.write("  [1/2] Computing Buy/Sell/Hold signals...")
+        self.stdout.write("  [1/3] Computing Buy/Sell/Hold signals...")
         sig_result = compute_signals_all()
         self.stdout.write(
             f"  Signals: {sig_result['success']} ok / "
             f"{sig_result['failed']} failed"
         )
 
-        self.stdout.write("  [2/2] Running Linear Regression predictions (fast mode)...")
+        self.stdout.write("  [2/3] Running Linear Regression predictions (fast mode)...")
         pred_result = predict_all_tickers(horizon_days=1)
         self.stdout.write(
             f"  Predictions: {pred_result['success']} ok / "
             f"{pred_result['failed']} failed / "
             f"{pred_result['skipped']} skipped"
+        )
+
+        self.stdout.write("  [3/3] Computing Gold insights...")
+        insight_result = compute_insights_all()
+        self.stdout.write(
+            f"  Insights: {insight_result['success']} ok / "
+            f"{insight_result['failed']} failed"
         )
 
     def handle(self, *args, **options):
