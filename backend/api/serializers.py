@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from analytics.data_access import get_latest_insights_bulk
+from analytics.data_access import get_fundamentals_bulk, get_latest_insights_bulk
 from portfolio.models import Portfolio, Stock, PortfolioStock
 
 
@@ -67,6 +67,32 @@ class GoldInsightMixin:
     def _insight(self, obj):
         return self._insight_map().get(obj.symbol, {})
 
+    def _fundamentals_map(self):
+        if hasattr(self, "_cached_fundamentals_map"):
+            return self._cached_fundamentals_map
+
+        instance = getattr(self, "instance", None)
+        tickers = set()
+
+        if instance is None:
+            self._cached_fundamentals_map = {}
+            return self._cached_fundamentals_map
+
+        if isinstance(instance, (list, tuple)):
+            tickers = {obj.symbol for obj in instance if getattr(obj, "symbol", None)}
+        elif hasattr(instance, "__iter__") and not isinstance(instance, Stock):
+            tickers = {obj.symbol for obj in instance if getattr(obj, "symbol", None)}
+        else:
+            symbol = getattr(instance, "symbol", None)
+            if symbol:
+                tickers = {symbol}
+
+        self._cached_fundamentals_map = get_fundamentals_bulk(list(tickers)) if tickers else {}
+        return self._cached_fundamentals_map
+
+    def _fundamentals(self, obj):
+        return self._fundamentals_map().get(obj.symbol, {})
+
 
 class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
     pe_ratio = serializers.SerializerMethodField()
@@ -109,7 +135,8 @@ class StockListSerializer(GoldInsightMixin, serializers.ModelSerializer):
         return [float(value) for value in prices if isinstance(value, (int, float))]
 
     def get_pe_ratio(self, obj):
-        return self._insight(obj).get("pe_ratio")
+        fund = self._fundamentals(obj)
+        return fund.get("trailing_pe") if fund.get("trailing_pe") is not None else self._insight(obj).get("pe_ratio")
 
     def get_discount_level(self, obj):
         return self._insight(obj).get("discount_level")
@@ -179,16 +206,23 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
 
     def get_analytics(self, obj):
         insight = self._insight(obj)
+        fund = self._fundamentals(obj)
+        pe_ratio = fund.get("trailing_pe")
+        if pe_ratio is None:
+            pe_ratio = insight.get("pe_ratio")
+
         if not insight:
             return {
-                "pe_ratio": None,
+                "pe_ratio": pe_ratio,
+                "forward_pe": fund.get("forward_pe"),
                 "discount_level": None,
                 "opportunity_score": None,
                 "graph_data": {},
                 "last_updated": None,
             }
         return {
-            "pe_ratio": insight.get("pe_ratio"),
+            "pe_ratio": pe_ratio,
+            "forward_pe": fund.get("forward_pe"),
             "discount_level": insight.get("discount_level"),
             "opportunity_score": insight.get("opportunity_score"),
             "graph_data": insight.get("graph_data") or {},
