@@ -831,6 +831,12 @@ from api.serializers import PortfolioStockSerializer
 class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class   = PortfolioStockSerializer
     permission_classes = [IsAuthenticated]
+    DIFF_SORT_ALIASES = {
+        "diff": "price_diff",
+        "price_diff": "price_diff",
+        "diff_pct": "expected_change_pct",
+        "expected_change_pct": "expected_change_pct",
+    }
 
     def get_queryset(self):
         portfolio_id = self.request.query_params.get("portfolio")
@@ -838,6 +844,61 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
         if portfolio_id:
             qs = qs.filter(portfolio_id=portfolio_id)
         return qs.order_by("sector", "ticker")
+
+    @staticmethod
+    def _to_float(raw_value):
+        if raw_value in (None, ""):
+            return None
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_diff_filters(self, rows):
+        qp = self.request.query_params
+        diff_sign = (qp.get("diff_sign") or "").strip().lower()
+        diff_min = self._to_float(qp.get("diff_min"))
+        diff_max = self._to_float(qp.get("diff_max"))
+        diff_pct_min = self._to_float(qp.get("diff_pct_min") or qp.get("expected_change_pct_min"))
+        diff_pct_max = self._to_float(qp.get("diff_pct_max") or qp.get("expected_change_pct_max"))
+
+        def _matches(row):
+            price_diff = row.get("price_diff")
+            diff_pct = row.get("expected_change_pct")
+
+            if diff_sign == "positive":
+                if price_diff is None or price_diff <= 0:
+                    return False
+            elif diff_sign == "negative":
+                if price_diff is None or price_diff >= 0:
+                    return False
+
+            if diff_min is not None and (price_diff is None or price_diff < diff_min):
+                return False
+            if diff_max is not None and (price_diff is None or price_diff > diff_max):
+                return False
+            if diff_pct_min is not None and (diff_pct is None or diff_pct < diff_pct_min):
+                return False
+            if diff_pct_max is not None and (diff_pct is None or diff_pct > diff_pct_max):
+                return False
+
+            return True
+
+        return [row for row in rows if _matches(row)]
+
+    def _apply_diff_sort(self, rows):
+        sort_by_raw = (self.request.query_params.get("sort_by") or "").strip().lower()
+        sort_by = self.DIFF_SORT_ALIASES.get(sort_by_raw)
+        if not sort_by:
+            return rows
+
+        sort_order = (self.request.query_params.get("sort_order") or "desc").strip().lower()
+        reverse = sort_order != "asc"
+
+        rows_with_value = [row for row in rows if row.get(sort_by) is not None]
+        rows_without_value = [row for row in rows if row.get(sort_by) is None]
+        rows_with_value.sort(key=lambda row: row.get(sort_by), reverse=reverse)
+        return rows_with_value + rows_without_value
 
     def list(self, request, *args, **kwargs):
         qs = self.get_queryset()
@@ -910,6 +971,13 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                 exp_change = forecast_data.get("expected_change_pct")
                 if exp_change is None:
                     exp_change = round(daily_ret * 100, 2) if daily_ret is not None else None
+                predicted_price = forecast_data.get("predicted_price")
+                current_price = silver.get("close")
+                price_diff = (
+                    round(predicted_price - current_price, 4)
+                    if predicted_price is not None and current_price is not None
+                    else None
+                )
 
                 results.append(
                     {
@@ -919,10 +987,11 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "company_name": ps.company_name,
                         "sector": ps.sector,
                         "geography": ps.geography,
-                        "current_price": silver.get("close"),
+                        "current_price": current_price,
                         "min_price": rng.get("week_low"),
                         "max_price": rng.get("week_high"),
-                        "predicted_price_1d": forecast_data.get("predicted_price"),
+                        "predicted_price_1d": predicted_price,
+                        "price_diff": price_diff,
                         "expected_change_pct": exp_change,
                         "direction_signal": direction,
                         "model_confidence_r2": forecast_data.get("confidence_r2"),
@@ -960,6 +1029,7 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "min_price": None,
                         "max_price": None,
                         "predicted_price_1d": None,
+                        "price_diff": None,
                         "expected_change_pct": None,
                         "direction_signal": "",
                         "model_confidence_r2": None,
@@ -985,4 +1055,6 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                     }
                 )
 
+        results = self._apply_diff_filters(results)
+        results = self._apply_diff_sort(results)
         return Response(results)

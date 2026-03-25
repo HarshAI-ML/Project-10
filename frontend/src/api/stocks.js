@@ -22,9 +22,28 @@ export const removeStockFromPortfolio = async (portfolioId, symbol) => {
   await api.delete(`portfolio/${portfolioId}/remove-stock/?${queryParams.toString()}`);
 };
 
-export const fetchStocks = async (portfolioId = null) => {
+export const fetchStocks = async (portfolioId = null, options = {}) => {
   if (portfolioId) {
-    const { data } = await api.get(`portfolio-stocks/?portfolio=${portfolioId}`);
+    const queryParams = new URLSearchParams({
+      portfolio: String(portfolioId),
+    });
+    if (options.sort_by) queryParams.set("sort_by", String(options.sort_by));
+    if (options.sort_order) queryParams.set("sort_order", String(options.sort_order));
+    if (options.diff_sign) queryParams.set("diff_sign", String(options.diff_sign));
+    if (options.diff_min !== undefined && options.diff_min !== null && options.diff_min !== "") {
+      queryParams.set("diff_min", String(options.diff_min));
+    }
+    if (options.diff_max !== undefined && options.diff_max !== null && options.diff_max !== "") {
+      queryParams.set("diff_max", String(options.diff_max));
+    }
+    if (options.diff_pct_min !== undefined && options.diff_pct_min !== null && options.diff_pct_min !== "") {
+      queryParams.set("diff_pct_min", String(options.diff_pct_min));
+    }
+    if (options.diff_pct_max !== undefined && options.diff_pct_max !== null && options.diff_pct_max !== "") {
+      queryParams.set("diff_pct_max", String(options.diff_pct_max));
+    }
+
+    const { data } = await api.get(`portfolio-stocks/?${queryParams.toString()}`);
     const rows = Array.isArray(data) ? data : [];
     return rows.map((item) => ({
       id: item.id,
@@ -36,6 +55,7 @@ export const fetchStocks = async (portfolioId = null) => {
       min_price: item.min_price,
       max_price: item.max_price,
       predicted_price_1d: item.predicted_price_1d,
+      price_diff: item.price_diff,
       expected_change_pct: item.expected_change_pct,
       direction_signal: item.direction_signal,
       model_confidence_r2: item.model_confidence_r2,

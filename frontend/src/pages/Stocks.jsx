@@ -55,6 +55,23 @@ export default function Stocks() {
   const [openingClusters, setOpeningClusters] = useState(false);
   const [chartMode, setChartMode] = useState("pe");
 
+  // Bloomberg-style filtering state
+  const [quickFilter, setQuickFilter] = useState('all');
+  const [geography, setGeography] = useState('all');
+  const [sortCol, setSortCol] = useState('expected_change_pct');
+  const [sortDir, setSortDir] = useState('desc');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advFilters, setAdvFilters] = useState({
+    peMin: '',
+    peMax: '',
+    sentimentMin: 0,
+    sentimentMax: 10,
+    changeMin: '',
+    changeMax: '',
+    r2Min: 0,
+    discountLevels: ['HIGH', 'MEDIUM', 'LOW', '—'],
+  });
+
   const selectedPortfolio = useMemo(
     () => portfolios.find((p) => String(p.id) === String(portfolioId)) || null,
     [portfolios, portfolioId]
@@ -77,13 +94,143 @@ export default function Stocks() {
     () => new Set(stocks.map((s) => String(s.symbol).toUpperCase())),
     [stocks]
   );
+  // Filtered and sorted stocks using client-side Bloomberg-style filters
+  const filteredStocks = useMemo(() => {
+    let result = [...stocks];
+
+    // 1. Geography filter
+    if (geography !== 'all') {
+      result = result.filter(s => s.geography === geography);
+    }
+
+    // 2. Quick filter chip
+    switch (quickFilter) {
+      case 'gainers':
+        result = result.filter(s => (s.expected_change_pct || 0) > 0);
+        break;
+      case 'losers':
+        result = result.filter(s => (s.expected_change_pct || 0) < 0);
+        break;
+      case 'buy':
+        result = result.filter(s => s.recommended_action === 'BUY');
+        break;
+      case 'sell':
+        result = result.filter(s => s.recommended_action === 'SELL');
+        break;
+      case 'hold':
+        result = result.filter(s => s.recommended_action === 'HOLD');
+        break;
+      case 'high_disc':
+        result = result.filter(s => s.discount_level === 'HIGH');
+        break;
+      case 'pos_sent':
+        result = result.filter(s => s.sentiment_label === 'Positive');
+        break;
+      case 'neg_sent':
+        result = result.filter(s => s.sentiment_label === 'Negative');
+        break;
+      // 'all' case: no filter
+    }
+
+    // 3. Advanced filters
+    if (advFilters.peMin !== '') {
+      result = result.filter(s => s.pe_ratio != null && s.pe_ratio >= Number(advFilters.peMin));
+    }
+    if (advFilters.peMax !== '') {
+      result = result.filter(s => s.pe_ratio != null && s.pe_ratio <= Number(advFilters.peMax));
+    }
+    if (advFilters.sentimentMin > 0) {
+      result = result.filter(s => (s.sentiment_score || 0) >= advFilters.sentimentMin);
+    }
+    if (advFilters.sentimentMax < 10) {
+      result = result.filter(s => (s.sentiment_score || 0) <= advFilters.sentimentMax);
+    }
+    if (advFilters.changeMin !== '') {
+      result = result.filter(s => (s.expected_change_pct || 0) >= Number(advFilters.changeMin));
+    }
+    if (advFilters.changeMax !== '') {
+      result = result.filter(s => (s.expected_change_pct || 0) <= Number(advFilters.changeMax));
+    }
+    if (advFilters.r2Min > 0) {
+      result = result.filter(s => (s.model_confidence_r2 || 0) >= advFilters.r2Min);
+    }
+    if (advFilters.discountLevels.length < 4) {
+      result = result.filter(s => advFilters.discountLevels.includes(s.discount_level || '—'));
+    }
+
+    // 4. Sorting
+    const signalOrder = { BUY: 3, HOLD: 2, SELL: 1, null: 0, undefined: 0 };
+    const discOrder = { HIGH: 3, MEDIUM: 2, LOW: 1, null: 0, undefined: 0 };
+
+    result.sort((a, b) => {
+      let aVal, bVal;
+      switch (sortCol) {
+        case 'symbol':
+          aVal = a.symbol || '';
+          bVal = b.symbol || '';
+          break;
+        case 'current_price':
+          aVal = a.current_price || 0;
+          bVal = b.current_price || 0;
+          break;
+        case 'expected_change_pct':
+          aVal = a.expected_change_pct || 0;
+          bVal = b.expected_change_pct || 0;
+          break;
+        case 'predicted_price_1d':
+          aVal = a.predicted_price_1d || 0;
+          bVal = b.predicted_price_1d || 0;
+          break;
+        case 'recommended_action':
+          aVal = signalOrder[a.recommended_action] || 0;
+          bVal = signalOrder[b.recommended_action] || 0;
+          break;
+        case 'model_confidence_r2':
+          aVal = a.model_confidence_r2 ?? -1;
+          bVal = b.model_confidence_r2 ?? -1;
+          break;
+        case 'pe_ratio':
+          aVal = a.pe_ratio ?? Infinity;
+          bVal = b.pe_ratio ?? Infinity;
+          break;
+        case 'sentiment_score':
+          aVal = a.sentiment_score ?? -1;
+          bVal = b.sentiment_score ?? -1;
+          break;
+        case 'discount_level':
+          aVal = discOrder[a.discount_level] || 0;
+          bVal = discOrder[b.discount_level] || 0;
+          break;
+        default:
+          aVal = 0;
+          bVal = 0;
+      }
+
+      // Secondary sort by symbol for stability
+      if (aVal === bVal) {
+        const aSymbol = a.symbol || '';
+        const bSymbol = b.symbol || '';
+        return sortDir === 'asc' ? aSymbol.localeCompare(bSymbol) : bSymbol.localeCompare(aSymbol);
+      }
+
+      if (typeof aVal === 'string') {
+        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+
+    return result;
+  }, [stocks, quickFilter, geography, sortCol, sortDir, advFilters]);
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError("");
       try {
-        const [portfolioData, stockData] = await Promise.all([fetchPortfolio(), fetchStocks(portfolioId)]);
+        const [portfolioData, stockData] = await Promise.all([
+          fetchPortfolio(),
+          fetchStocks(portfolioId), // No options - fetch all stocks, filter client-side
+        ]);
         const pArr = Array.isArray(portfolioData) ? portfolioData : [];
         const sArr = Array.isArray(stockData) ? stockData : [];
         if (!pArr.some((p) => String(p.id) === String(portfolioId))) {
@@ -226,6 +373,274 @@ export default function Stocks() {
         </button>
       </form>
 
+      {/* ── Quick Filter Chips ── */}
+      <div className="flex flex-wrap gap-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+        {[
+          { key: 'all', label: 'All' },
+          { key: 'gainers', label: 'Gainers' },
+          { key: 'losers', label: 'Losers' },
+          { key: 'buy', label: 'BUY Signal' },
+          { key: 'sell', label: 'SELL Signal' },
+          { key: 'hold', label: 'HOLD Signal' },
+          { key: 'high_disc', label: 'High Discount' },
+          { key: 'pos_sent', label: 'Positive Sentiment' },
+          { key: 'neg_sent', label: 'Negative Sentiment' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setQuickFilter(key)}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+              quickFilter === key
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Geography Toggle ── */}
+      <div className="flex gap-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Geography:</span>
+          {[
+            { key: 'all', label: 'All', flag: null },
+            { key: 'IN', label: 'India', flag: '🇮🇳' },
+            { key: 'US', label: 'US', flag: '🇺🇸' },
+          ].map(({ key, label, flag }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setGeography(key)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                geography === key
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {flag && <span className="mr-1">{flag}</span>}
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Advanced Filters Toggle ── */}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+      >
+        <span>{showAdvanced ? '▲ Advanced Filters' : '▼ Advanced Filters'}</span>
+      </button>
+
+      {/* ── Advanced Filters Panel ── */}
+      {showAdvanced && (
+        <div className="space-y-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* PE Ratio */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                PE Ratio Range
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={advFilters.peMin}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, peMin: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                />
+                <span className="text-slate-400">to</span>
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={advFilters.peMax}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, peMax: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Sentiment Score */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Sentiment Score (0-10)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="10"
+                  step="0.5"
+                  value={advFilters.sentimentMin}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, sentimentMin: Number(e.target.value) }))}
+                  className="flex-1"
+                />
+                <span className="w-12 text-right text-sm font-mono">{advFilters.sentimentMin.toFixed(1)}</span>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="10"
+                  step="0.5"
+                  value={advFilters.sentimentMax}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, sentimentMax: Number(e.target.value) }))}
+                  className="flex-1"
+                />
+                <span className="w-12 text-right text-sm font-mono">{advFilters.sentimentMax.toFixed(1)}</span>
+              </div>
+            </div>
+
+            {/* % Change */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                % Change Range
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Min %"
+                  value={advFilters.changeMin}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, changeMin: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                />
+                <span className="text-slate-400">to</span>
+                <input
+                  type="number"
+                  placeholder="Max %"
+                  value={advFilters.changeMax}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, changeMax: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* R² Minimum */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Min R² (Model Confidence)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={advFilters.r2Min}
+                  onChange={(e) => setAdvFilters(f => ({ ...f, r2Min: Number(e.target.value) }))}
+                  className="flex-1"
+                />
+                <span className="w-12 text-right text-sm font-mono">{advFilters.r2Min.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Discount Level */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Discount Level
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {['HIGH', 'MEDIUM', 'LOW', '—'].map(level => (
+                  <label key={level} className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={advFilters.discountLevels.includes(level)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setAdvFilters(f => ({
+                            ...f,
+                            discountLevels: [...f.discountLevels, level]
+                          }));
+                        } else {
+                          setAdvFilters(f => ({
+                            ...f,
+                            discountLevels: f.discountLevels.filter(l => l !== level)
+                          }));
+                        }
+                      }}
+                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-slate-700">{level}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Clear Button */}
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => setAdvFilters({
+                  peMin: '',
+                  peMax: '',
+                  sentimentMin: 0,
+                  sentimentMax: 10,
+                  changeMin: '',
+                  changeMax: '',
+                  r2Min: 0,
+                  discountLevels: ['HIGH', 'MEDIUM', 'LOW', '—'],
+                })}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Clear Advanced Filters
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Results Summary Bar ── */}
+      <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+        <div className="text-sm text-slate-600">
+          Showing <span className="font-bold text-slate-900"> {filteredStocks.length} </span>
+          of <span className="font-bold text-slate-900"> {stocks.length} </span> stocks
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(() => {
+            const tags = [];
+            if (quickFilter !== 'all') {
+              const label = quickFilter.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+              tags.push({ key: 'quick', label, clear: () => setQuickFilter('all') });
+            }
+            if (geography !== 'all') {
+              tags.push({ key: 'geo', label: geography === 'IN' ? 'India' : 'US', clear: () => setGeography('all') });
+            }
+            if (advFilters.peMin) tags.push({ key: 'peMin', label: `PE ≥ ${advFilters.peMin}`, clear: () => setAdvFilters(f => ({ ...f, peMin: '' })) });
+            if (advFilters.peMax) tags.push({ key: 'peMax', label: `PE ≤ ${advFilters.peMax}`, clear: () => setAdvFilters(f => ({ ...f, peMax: '' })) });
+            if (advFilters.changeMin) tags.push({ key: 'chgMin', label: `% ≥ ${advFilters.changeMin}%`, clear: () => setAdvFilters(f => ({ ...f, changeMin: '' })) });
+            if (advFilters.changeMax) tags.push({ key: 'chgMax', label: `% ≤ ${advFilters.changeMax}%`, clear: () => setAdvFilters(f => ({ ...f, changeMax: '' })) });
+            if (advFilters.r2Min > 0) tags.push({ key: 'r2', label: `R² ≥ ${advFilters.r2Min.toFixed(2)}`, clear: () => setAdvFilters(f => ({ ...f, r2Min: 0 })) });
+            if (advFilters.sentimentMin > 0) tags.push({ key: 'sentMin', label: `Sentiment ≥ ${advFilters.sentimentMin.toFixed(1)}`, clear: () => setAdvFilters(f => ({ ...f, sentimentMin: 0 })) });
+            if (advFilters.sentimentMax < 10) tags.push({ key: 'sentMax', label: `Sentiment ≤ ${advFilters.sentimentMax.toFixed(1)}`, clear: () => setAdvFilters(f => ({ ...f, sentimentMax: 10 })) });
+            if (advFilters.discountLevels.length < 4) {
+              const discLabels = advFilters.discountLevels.map(d => d === '—' ? 'None' : d).join(', ');
+              tags.push({ key: 'disc', label: `Discount: ${discLabels}`, clear: () => setAdvFilters(f => ({ ...f, discountLevels: ['HIGH', 'MEDIUM', 'LOW', '—'] })) });
+            }
+            return tags;
+          })()
+          .map(tag => (
+            <span
+              key={tag.key}
+              className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700"
+            >
+              {tag.label}
+              <button
+                type="button"
+                onClick={tag.clear}
+                className="ml-1 hover:text-indigo-900"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+
+
       {/* ── Loading ── */}
       {(loading || tableLoading) && (
         <div className="flex justify-center py-10"><Loader /></div>
@@ -299,9 +714,12 @@ export default function Stocks() {
           ) : (
             <>
               <StockTable
-                stocks={stocks}
+                stocks={filteredStocks}
                 onDeleteStock={handleDeleteStock}
                 deletingStockId={deletingStockId}
+                sortCol={sortCol}
+                sortDir={sortDir}
+                onSort={(col, dir) => { setSortCol(col); setSortDir(dir); }}
               />
 
               <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-100">

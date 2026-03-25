@@ -4,7 +4,55 @@ import { currencyCodeFromItem, formatMoney } from "../utils/currency";
 const statusLabel = (stock) =>
   stock.prediction_status === "insufficient_data" ? "Low Data" : "—";
 
-export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
+const normalizeAction = (value) => {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "BUY" || text.includes("BUY")) return "BUY";
+  if (text === "SELL" || text.includes("SELL") || text.includes("REDUCE")) return "SELL";
+  if (text === "HOLD" || text.includes("HOLD")) return "HOLD";
+  return "";
+};
+
+const ActionBadge = ({ action }) => {
+  const normalized = normalizeAction(action);
+  if (!normalized) {
+    return <span className="text-xs text-slate-400">—</span>;
+  }
+  const style =
+    normalized === "BUY"
+      ? "bg-emerald-100 text-emerald-700"
+      : normalized === "SELL"
+      ? "bg-rose-100 text-rose-600"
+      : "bg-amber-100 text-amber-700";
+  return (
+    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${style}`}>
+      {normalized}
+    </span>
+  );
+};
+
+const SortableHeader = ({ col, label, sortCol, sortDir, onSort }) => {
+  const isActive = sortCol === col;
+  const icon = !isActive ? ' ⇅' : (sortDir === 'asc' ? ' ↑' : ' ↓');
+
+  return (
+    <th
+      className="cursor-pointer select-none px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap hover:text-indigo-400 transition-colors"
+      onClick={() => {
+        if (onSort) {
+          if (sortCol === col) {
+            onSort(col, sortDir === 'asc' ? 'desc' : 'asc');
+          } else {
+            onSort(col, 'desc');
+          }
+        }
+      }}
+    >
+      {label}{icon}
+    </th>
+  );
+};
+
+export default function StockTable({ stocks, onDeleteStock, deletingStockId, sortCol, sortDir, onSort }) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -31,39 +79,20 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
         <table className="min-w-full">
           <thead>
             <tr className="sticky top-0 z-10 bg-slate-900 text-white">
-              {[
-                "Symbol",
-                "Company",
-                "Price",
-                "Min",
-                "Max",
-                "Predicted (1D)",
-                "% Change",
-                "Signal",
-                "R²",
-                "PE",
-                "Discount",
-                "Sentiment",
-                "Source",
-                "Action",
-              ].map((h) => (
-                <th
-                  key={h}
-                  className={`px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${
-                    h === "Symbol" ||
-                    h === "Company" ||
-                    h === "Signal" ||
-                    h === "Discount" ||
-                    h === "Sentiment" ||
-                    h === "Source" ||
-                    h === "Action"
-                      ? "text-left"
-                      : "text-right"
-                  }`}
-                >
-                  {h}
-                </th>
-              ))}
+              <SortableHeader col="symbol" label="Symbol" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Company</th>
+              <SortableHeader col="current_price" label="Price" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Min</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Max</th>
+              <SortableHeader col="predicted_price_1d" label="Predicted" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="expected_change_pct" label="% Change" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="recommended_action" label="Signal" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="model_confidence_r2" label="R²" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="pe_ratio" label="PE" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="discount_level" label="Discount" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="sentiment_score" label="Sentiment" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Source</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Action</th>
             </tr>
           </thead>
 
@@ -75,7 +104,6 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
                 (stock.predicted_price_1d !== null && stock.predicted_price_1d !== undefined);
               const currency = currencyCodeFromItem(stock);
               const changeUp = ok && Number(stock.expected_change_pct || 0) >= 0;
-              const isIncrease = stock.direction_signal?.includes("Increase");
               const clickable = stock.id || stock.symbol;
 
               return (
@@ -128,13 +156,11 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId }) {
                   </td>
 
                   <td className="px-4 py-3">
-                    {ok ? (
-                      <span
-                        className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                          isIncrease ? "text-emerald-600" : "text-rose-500"
-                        }`}
-                      >
-                        {isIncrease ? "▲" : "▼"} {stock.direction_signal}
+                    {normalizeAction(stock.recommended_action) ? (
+                      <ActionBadge action={stock.recommended_action} />
+                    ) : ok && stock.direction_signal ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600">
+                        {stock.direction_signal}
                       </span>
                     ) : (
                       <span className="text-xs text-slate-400">{statusLabel(stock)}</span>

@@ -50,6 +50,32 @@ const SignalBadge = ({ signal }) => {
   );
 };
 
+const normalizeAction = (value) => {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "BUY" || text.includes("BUY")) return "BUY";
+  if (text === "SELL" || text.includes("SELL") || text.includes("REDUCE")) return "SELL";
+  if (text === "HOLD" || text.includes("HOLD")) return "HOLD";
+  return "";
+};
+
+const ActionBadge = ({ action }) => {
+  const normalized = normalizeAction(action);
+  if (!normalized) {
+    return <span className="text-sm text-slate-400">—</span>;
+  }
+  const style =
+    normalized === "BUY"
+      ? "bg-emerald-100 text-emerald-700"
+      : normalized === "SELL"
+      ? "bg-rose-100 text-rose-600"
+      : "bg-amber-100 text-amber-700";
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${style}`}>
+      {normalized}
+    </span>
+  );
+};
+
 /* Discount badge */
 const DiscountBadge = ({ level }) => {
   const styles = {
@@ -280,15 +306,15 @@ export default function StockDetail() {
       {/* Analytics metrics row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
-          label="Signal"
+          label="Action Signal"
           value={
-            hasPrediction ? (
-              <SignalBadge signal={stock.direction_signal} />
+            stock.recommended_action ? (
+              <ActionBadge action={stock.recommended_action} />
             ) : (
-              <span className="text-base text-slate-400">{predMissing}</span>
+              <span className="text-base text-slate-400">Unavailable</span>
             )
           }
-          sub="1D linear trend direction"
+          sub="BUY / SELL / HOLD"
           accent="slate"
         />
         <MetricCard
