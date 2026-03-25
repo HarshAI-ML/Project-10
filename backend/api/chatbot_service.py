@@ -1,11 +1,14 @@
 import os
 from typing import Any, Dict, List, Optional, TypedDict
+import json
 
 import requests
 from django.contrib.auth.models import AnonymousUser
 
 from analytics.data_access import (
+    get_fundamentals_bulk,
     get_latest_forecasts_bulk,
+    get_latest_price,
     get_latest_signals_bulk,
     get_stocks_sentiment_bulk,
 )
@@ -155,6 +158,7 @@ def _build_user_context(user: Any) -> str:
     signals = get_latest_signals_bulk(tickers) if tickers else {}
     forecasts = get_latest_forecasts_bulk(tickers) if tickers else {}
     sentiment = get_stocks_sentiment_bulk(tickers) if tickers else {}
+    fundamentals = get_fundamentals_bulk(tickers) if tickers else {}
 
     lines: List[str] = []
     lines.append("User portfolio summary:")
@@ -170,80 +174,243 @@ def _build_user_context(user: Any) -> str:
             direction = fc.get("direction")
             exp = fc.get("expected_change_pct")
             sent = sentiment.get(ticker, {}).get("sentiment_label")
+            pe = fundamentals.get(ticker, {}).get("trailing_pe")
             lines.append(
-                f"  - {ticker}: signal={sig or 'n/a'}, forecast_direction={direction or 'n/a'}, expected_change_pct={exp if exp is not None else 'n/a'}, sentiment={sent or 'n/a'}"
+                f"  - {ticker}: signal={sig or 'n/a'}, forecast_direction={direction or 'n/a'}, expected_change_pct={exp if exp is not None else 'n/a'}, sentiment={sent or 'n/a'}, pe_ratio={pe if pe is not None else 'n/a'}"
             )
 
     return "\n".join(lines)
 
 
-def _detect_top_performer_intent(message: str) -> bool:
-    text = (message or "").strip().lower()
-    if not text:
-        return False
-    portfolio_words = ("portfolio", "portfolios", "my stocks", "my holdings")
-    top_words = (
-        "best performing",
-        "highest performing",
-        "top performing",
-        "best stock",
-        "highest stock",
-        "top stock",
-        "which stock is best",
-    )
-    return any(p in text for p in portfolio_words) and any(t in text for t in top_words)
+def _to_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
 
 
-def _direct_top_performer_answer(user: Any) -> Optional[str]:
+def _keyword_score(query: str, stock_row: Dict[str, Any]) -> int:
+    q = (query or "").lower()
+    score = 0
+    if not q:
+        return score
+    fields = [
+        str(stock_row.get("ticker", "")).lower(),
+        str(stock_row.get("company_name", "")).lower(),
+        str(stock_row.get("sector", "")).lower(),
+        str(stock_row.get("geography", "")).lower(),
+        str(stock_row.get("portfolio_name", "")).lower(),
+    ]
+    for token in [t for t in q.replace("/", " ").split() if len(t) > 2]:
+        if any(token in field for field in fields):
+            score += 1
+    return score
+
+
+def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
     portfolios = list(
-        Portfolio.objects.filter(user=user).values("id", "name").order_by("-is_default", "name")
+        Portfolio.objects.filter(user=user)
+        .values("id", "name", "geography", "is_default")
+        .order_by("-is_default", "name")
     )
     if not portfolios:
-        return "You currently do not have any portfolios yet."
+        return {"summary": {"portfolio_count": 0, "stock_count": 0}, "portfolios": [], "stocks": []}
 
-    portfolio_ids = [p["id"] for p in portfolios]
-    stocks = list(
-        PortfolioStock.objects.filter(portfolio_id__in=portfolio_ids).values("portfolio_id", "ticker")
+    portfolio_map = {p["id"]: p for p in portfolios}
+    portfolio_ids = list(portfolio_map.keys())
+
+    stock_links = list(
+        PortfolioStock.objects.filter(portfolio_id__in=portfolio_ids)
+        .values("portfolio_id", "ticker", "company_name", "sector", "geography")
+        .order_by("portfolio_id", "ticker")
     )
-    tickers = sorted({s["ticker"] for s in stocks if s.get("ticker")})
-    if not tickers:
-        return "I could not find stocks in your portfolios yet."
+    tickers = sorted({row["ticker"] for row in stock_links if row.get("ticker")})
 
-    forecasts = get_latest_forecasts_bulk(tickers)
-    ranked = []
-    for ticker in tickers:
+    forecasts = get_latest_forecasts_bulk(tickers) if tickers else {}
+    signals = get_latest_signals_bulk(tickers) if tickers else {}
+    sentiment = get_stocks_sentiment_bulk(tickers) if tickers else {}
+    fundamentals = get_fundamentals_bulk(tickers) if tickers else {}
+    latest_prices: Dict[str, Optional[float]] = {}
+    for t in tickers:
+        try:
+            latest = get_latest_price(t) or {}
+            latest_prices[t] = _to_float(latest.get("close"))
+        except Exception:
+            latest_prices[t] = None
+
+    stock_rows: List[Dict[str, Any]] = []
+    for row in stock_links:
+        ticker = row.get("ticker")
+        portfolio = portfolio_map.get(row["portfolio_id"], {})
         fc = forecasts.get(ticker, {})
-        change = fc.get("expected_change_pct")
-        if change is None:
-            continue
-        ranked.append(
+        sg = signals.get(ticker, {})
+        st = sentiment.get(ticker, {})
+        fd = fundamentals.get(ticker, {})
+        stock_rows.append(
             {
+                "portfolio_name": portfolio.get("name"),
+                "portfolio_geography": portfolio.get("geography"),
                 "ticker": ticker,
-                "expected_change_pct": float(change),
-                "predicted_price": fc.get("predicted_price"),
-                "confidence_r2": fc.get("confidence_r2"),
+                "company_name": row.get("company_name"),
+                "sector": row.get("sector"),
+                "geography": row.get("geography"),
+                "current_price": latest_prices.get(ticker),
+                "expected_change_pct": _to_float(fc.get("expected_change_pct")),
+                "predicted_price": _to_float(fc.get("predicted_price")),
+                "forecast_direction": fc.get("direction"),
+                "forecast_confidence_r2": _to_float(fc.get("confidence_r2")),
+                "signal": sg.get("signal"),
+                "signal_confidence": _to_float(sg.get("confidence")),
+                "sentiment_label": st.get("sentiment_label"),
+                "sentiment_score": _to_float(st.get("sentiment_score")),
+                "trailing_pe": _to_float(fd.get("trailing_pe")),
+                "forward_pe": _to_float(fd.get("forward_pe")),
+                "eps_trailing": _to_float(fd.get("eps_trailing")),
+                "revenue_growth": _to_float(fd.get("revenue_growth")),
+                "market_cap": _to_float(fd.get("market_cap")),
             }
         )
 
-    if not ranked:
-        return (
-            "I could not rank your portfolio stocks right now because forecast data is not available yet. "
-            "Please run/refresh predictions and try again."
+    ranking_like = any(k in (query or "").lower() for k in ("highest", "lowest", "top", "best", "worst"))
+
+    # Query-aware relevance pruning to keep prompt compact but useful.
+    # For ranking-like queries keep broad coverage to avoid missing the true extreme value.
+    for row in stock_rows:
+        row["_score"] = _keyword_score(query, row)
+    ranked = sorted(
+        stock_rows,
+        key=lambda r: (
+            r["_score"],
+            _to_float(r.get("current_price")) or -999,
+            _to_float(r.get("predicted_price")) or -999,
+            _to_float(r.get("expected_change_pct")) or -999,
+        ),
+        reverse=True,
+    )
+    selected = ranked[:120] if ranking_like else ranked[:20]
+    for row in selected:
+        row.pop("_score", None)
+
+    # Compact summaries
+    by_portfolio: List[Dict[str, Any]] = []
+    for p in portfolios:
+        p_rows = [r for r in stock_rows if r.get("portfolio_name") == p.get("name")]
+        by_portfolio.append(
+            {
+                "name": p.get("name"),
+                "geography": p.get("geography"),
+                "is_default": bool(p.get("is_default")),
+                "stock_count": len(p_rows),
+            }
         )
 
-    ranked.sort(key=lambda x: x["expected_change_pct"], reverse=True)
-    best = ranked[0]
-    name_map = {p["id"]: p["name"] for p in portfolios}
-    containing = sorted({name_map[s["portfolio_id"]] for s in stocks if s.get("ticker") == best["ticker"]})
-    portfolios_text = ", ".join(containing[:3])
+    return {
+        "summary": {
+            "portfolio_count": len(portfolios),
+            "stock_count": len(stock_rows),
+            "selected_stock_context_count": len(selected),
+        },
+        "portfolios": by_portfolio,
+        "stocks": selected,
+    }
 
-    pct = round(best["expected_change_pct"], 2)
-    conf = best.get("confidence_r2")
-    conf_text = f"{round(float(conf), 2)}" if conf is not None else "n/a"
+
+def _build_user_context_prompt(user: Any, query: str) -> str:
+    payload = _build_user_context_payload(user, query)
+    return json.dumps(payload, ensure_ascii=True)
+
+
+def _resolve_metric_from_query(query: str) -> Optional[str]:
+    q = (query or "").lower()
+    if any(k in q for k in ("p/e", "pe ratio", "price to earnings", "trailing pe")):
+        return "trailing_pe"
+    if "market cap" in q:
+        return "market_cap"
+    if "eps" in q:
+        return "eps_trailing"
+    if any(k in q for k in ("predicted price", "forecast price", "prediction value")):
+        return "predicted_price"
+    if any(k in q for k in ("expected change", "change %", "change percentage", "expected return")):
+        return "expected_change_pct"
+    if any(k in q for k in ("price", "current price", "highest price", "lowest price")):
+        return "current_price"
+    return None
+
+
+def _resolve_direction_from_query(query: str) -> Optional[str]:
+    q = (query or "").lower()
+    if any(k in q for k in ("highest", "top", "max", "best", "largest")):
+        return "max"
+    if any(k in q for k in ("lowest", "min", "worst", "smallest")):
+        return "min"
+    return None
+
+
+def _answer_quant_query(user: Any, query: str) -> Optional[str]:
+    metric = _resolve_metric_from_query(query)
+    direction = _resolve_direction_from_query(query)
+    if not metric or not direction:
+        return None
+
+    payload = _build_user_context_payload(user, query)
+    rows = payload.get("stocks", [])
+    if not rows:
+        return "I could not find stock data in your portfolios yet."
+
+    q = (query or "").lower()
+
+    # Soft filters inferred from question
+    if any(k in q for k in (" us ", " u.s", "american", "united states")) or q.startswith("us "):
+        rows = [r for r in rows if str(r.get("geography", "")).upper() == "US" or str(r.get("portfolio_geography", "")).upper() == "US"]
+    elif any(k in q for k in (" india", "indian")):
+        rows = [r for r in rows if str(r.get("geography", "")).upper() == "IN" or str(r.get("portfolio_geography", "")).upper() == "IN"]
+
+    if any(k in q for k in ("financial", "finance", "bank", "banking")):
+        rows = [
+            r
+            for r in rows
+            if any(k in str(r.get("sector", "")).lower() for k in ("financial", "finance", "bank"))
+            or any(k in str(r.get("company_name", "")).lower() for k in ("financial", "finance", "bank"))
+            or "financial" in str(r.get("portfolio_name", "")).lower()
+        ]
+
+    # Portfolio name targeting from phrase "... in <name> portfolio"
+    marker = " portfolio"
+    if marker in q and " in " in q:
+        in_idx = q.rfind(" in ")
+        if in_idx >= 0:
+            fragment = q[in_idx + 4 : q.find(marker)].strip()
+            if fragment:
+                filtered = [r for r in rows if fragment in str(r.get("portfolio_name", "")).lower()]
+                if filtered:
+                    rows = filtered
+
+    candidates = [r for r in rows if _to_float(r.get(metric)) is not None]
+    if not candidates:
+        metric_label = metric.replace("_", " ")
+        return f"I found matching stocks but '{metric_label}' is not available in current data."
+
+    key_fn = lambda r: _to_float(r.get(metric)) or float("-inf")
+    best = max(candidates, key=key_fn) if direction == "max" else min(candidates, key=key_fn)
+    value = _to_float(best.get(metric))
+    if value is None:
+        return None
+
+    metric_label = {
+        "current_price": "current price",
+        "predicted_price": "predicted price",
+        "trailing_pe": "trailing P/E",
+        "expected_change_pct": "expected change %",
+        "market_cap": "market cap",
+        "eps_trailing": "trailing EPS",
+    }.get(metric, metric.replace("_", " "))
+
     return (
-        f"Your current top forecasted performer is {best['ticker']} with expected change of {pct}% "
-        f"(model confidence r2: {conf_text}). "
-        f"It appears in: {portfolios_text}."
+        f"In your selected scope, {best.get('ticker')} ({best.get('company_name')}) has the "
+        f"{'highest' if direction == 'max' else 'lowest'} {metric_label}: {value:.2f}. "
+        f"Portfolio: {best.get('portfolio_name')}. Sector: {best.get('sector') or 'n/a'}."
     )
 
 
@@ -257,7 +424,7 @@ def _load_user_context_node(state: ChatState) -> ChatState:
     if not user or isinstance(user, AnonymousUser):
         return {"user_context": ""}
     try:
-        return {"user_context": _build_user_context(user)}
+        return {"user_context": _build_user_context_prompt(user, state.get("message", ""))}
     except Exception:
         return {"user_context": "User context is temporarily unavailable."}
 
@@ -278,11 +445,14 @@ def _respond_auth_node(state: ChatState) -> ChatState:
     user_context = state.get("user_context", "")
     system_prompt = (
         "You are AUTO INVEST personalized assistant for logged-in users. "
-        "Use the provided user context when relevant and be explicit about uncertainty. "
-        "Never invent holdings. "
-        "Prioritize actionable portfolio-aware explanations. "
-        "Not financial advice.\n\n"
-        f"USER_CONTEXT:\n{user_context}"
+        "The USER_CONTEXT is authoritative account data. "
+        "Answer using USER_CONTEXT first. "
+        "Never say you don't have data if USER_CONTEXT includes relevant fields. "
+        "If a metric is missing in USER_CONTEXT, say that clearly and suggest next available metric. "
+        "Do not invent holdings, prices, or ratios. "
+        "When user asks for best/highest/lowest/top, compute from USER_CONTEXT and show ticker + value + portfolio. "
+        "Keep responses concise and practical. Not financial advice.\n\n"
+        f"USER_CONTEXT_JSON:\n{user_context}"
     )
     text = _call_chat_model(system_prompt, state.get("history", []), state.get("message", ""))
     return {"response": text}
@@ -290,10 +460,11 @@ def _respond_auth_node(state: ChatState) -> ChatState:
 
 def _run_fallback(state: ChatState) -> str:
     if state.get("is_authenticated"):
-        ctx = _build_user_context(state.get("user")) if state.get("user") else ""
+        ctx = _build_user_context_prompt(state.get("user"), state.get("message", "")) if state.get("user") else ""
         prompt = (
             "You are AUTO INVEST personalized assistant. "
-            "Use this context if useful:\n"
+            "Use this context as authoritative account data. "
+            "Compute rankings from it when asked.\n"
             f"{ctx}"
         )
     else:
@@ -310,10 +481,11 @@ def generate_chat_response(*, user: Any, message: str, history: Optional[List[Di
         "user": user,
     }
 
-    if base_state["is_authenticated"] and _detect_top_performer_intent(base_state["message"]):
-        direct = _direct_top_performer_answer(user)
-        if direct:
-            return {"reply": direct, "mode": "personalized"}
+    # General quantitative query handler (metric + ranking + optional filters)
+    if base_state["is_authenticated"]:
+        quantified = _answer_quant_query(user, base_state["message"])
+        if quantified:
+            return {"reply": quantified, "mode": "personalized"}
 
     if not LANGGRAPH_AVAILABLE:
         answer = _run_fallback(base_state)
