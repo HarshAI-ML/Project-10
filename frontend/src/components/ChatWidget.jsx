@@ -11,6 +11,18 @@ const buildWelcomeMessage = (isAuthenticated) => ({
 
 const createSessionId = () => `s_${Math.random().toString(36).slice(2, 10)}`;
 
+const normalizeAssistantContent = (text) => {
+  const raw = String(text || "").replace(/\r\n/g, "\n");
+  if (!raw.includes("|")) return raw;
+
+  // Heuristic fix for model replies where markdown table rows arrive flattened into one line.
+  let normalized = raw.replace(/:\s+\|/g, ":\n|");
+  normalized = normalized.replace(/\|\s+\|/g, "|\n|");
+  normalized = normalized.replace(/\s\|\s\|/g, "\n|");
+  normalized = normalized.replace(/\|\s{2,}\|/g, "|\n|");
+  return normalized;
+};
+
 export default function ChatWidget() {
   const { isAuthenticated, user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -106,7 +118,9 @@ export default function ChatWidget() {
                     m.role === "user" ? "bg-indigo-600 text-white" : "bg-white text-slate-700 border border-slate-200"
                   }`}
                 >
-                  {m.content}
+                  <div className={m.role === "assistant" ? "whitespace-pre-wrap break-words leading-relaxed" : ""}>
+                    {m.role === "assistant" ? normalizeAssistantContent(m.content) : m.content}
+                  </div>
                 </div>
               </div>
             ))}
