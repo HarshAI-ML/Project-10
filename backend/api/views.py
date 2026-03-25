@@ -413,9 +413,17 @@ class AuthViewSet(viewsets.GenericViewSet):
         
         try:
             otp_obj = TelegramOTP.objects.get(ref_id=ref_id)
-            
-            # Validate OTP
-            if not otp_obj.is_valid(otp_code):
+
+            # Enforce two-step flow:
+            # 1) OTP must be verified on the OTP step (`telegram_verify_otp`)
+            # 2) The same OTP code must be provided again for reset confirmation
+            if not otp_obj.is_verified:
+                return Response(
+                    {"detail": "OTP not verified. Please verify OTP first."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if otp_obj.is_expired() or otp_obj.otp_code != otp_code:
                 return Response(
                     {"detail": "Invalid or expired OTP."},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -431,10 +439,7 @@ class AuthViewSet(viewsets.GenericViewSet):
             
             user.set_password(new_password)
             user.save()
-            
-            # Mark OTP as verified
-            otp_obj.mark_verified()
-            
+
             # Send confirmation via Telegram
             send_password_reset_message(otp_obj.telegram_user_id)
             

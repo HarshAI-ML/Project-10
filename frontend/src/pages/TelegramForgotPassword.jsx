@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { initiateForgotPassword, resetPassword } from "../api/auth";
+import { initiateForgotPassword, resetPassword, verifyTelegramOTP } from "../api/auth";
 
 export default function TelegramForgotPassword() {
   const navigate = useNavigate();
@@ -49,14 +49,16 @@ export default function TelegramForgotPassword() {
   };
 
   const handleVerifyOTP = async () => {
-    if (!form.otp_code || form.otp_code.length !== 6) {
+    const otpCode = String(form.otp_code || "").trim();
+    if (!otpCode || otpCode.length !== 6 || !/^\d{6}$/.test(otpCode)) {
       setError("OTP must be 6 digits");
       return;
     }
     setLoading(true);
     setError("");
     try {
-      // Move to password reset step
+      await verifyTelegramOTP(refId, otpCode);
+      // Move to password reset step only when backend verifies OTP
       setStep(4);
     } catch (err) {
       setError(err.response?.data?.detail || "OTP verification failed.");
