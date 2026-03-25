@@ -47,6 +47,14 @@ jobs:
             mkdir -p "$BACKEND_DIR/logs"
 
             echo "=== Write backend .env ==="
+            DB_HOST="${{ secrets.DB_HOST }}"
+            DB_PORT="${{ secrets.DB_PORT }}"
+            DB_NAME="${{ secrets.DB_NAME }}"
+            DB_USER="${{ secrets.DB_USER }}"
+            DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+            if [ -z "$DB_HOST" ]; then DB_HOST="localhost"; fi
+            if [ -z "$DB_PORT" ]; then DB_PORT="5432"; fi
+
             if [ -n "${{ secrets.BACKEND_ENV }}" ]; then
               printf '%s\n' "${{ secrets.BACKEND_ENV }}" > "$BACKEND_DIR/.env"
             else
@@ -56,7 +64,17 @@ jobs:
                 printf '%s\n' "DJANGO_ALLOWED_HOSTS=98.70.29.114 autoinvestapi.duckdns.org autoinvest.duckdns.org localhost 127.0.0.1"
                 printf '%s\n' "CORS_ALLOWED_ORIGINS=https://autoinvest.duckdns.org https://autoinvestapi.duckdns.org http://localhost:5173"
                 printf '%s\n' "CORS_ALLOW_ALL_ORIGINS=True"
+                printf '%s\n' "DB_NAME=$DB_NAME"
+                printf '%s\n' "DB_USER=$DB_USER"
+                printf '%s\n' "DB_PASSWORD=$DB_PASSWORD"
+                printf '%s\n' "DB_HOST=$DB_HOST"
+                printf '%s\n' "DB_PORT=$DB_PORT"
               } > "$BACKEND_DIR/.env"
+            fi
+
+            if ! grep -q '^DB_PASSWORD=' "$BACKEND_DIR/.env" || grep -q '^DB_PASSWORD=$' "$BACKEND_DIR/.env"; then
+              echo "ERROR: DB_PASSWORD is missing in backend .env. Set BACKEND_ENV or DB_* GitHub secrets."
+              exit 1
             fi
 
             echo "=== Backend: create venv (if needed) + install deps ==="
