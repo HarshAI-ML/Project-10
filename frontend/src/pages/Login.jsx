@@ -91,6 +91,13 @@ export default function Login() {
               </div>
             </div>
 
+            <div className="flex items-center justify-between">
+              <label></label>
+              <Link to="/telegram-forgot-password" className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+                Forgot password?
+              </Link>
+            </div>
+
             {error && (
               <div className="flex items-center gap-2 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-rose-100">
                 <svg className="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">

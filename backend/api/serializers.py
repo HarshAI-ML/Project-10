@@ -359,3 +359,48 @@ class PredictionRunSerializer(serializers.Serializer):
     model_type = serializers.ChoiceField(choices=["xgboost", "lstm"])
     prediction_frequency = serializers.ChoiceField(choices=["hourly", "daily", "weekly", "monthly"])
     historical_period = serializers.ChoiceField(choices=["6mo", "1y", "2y", "5y"])
+
+
+# ─── Telegram OTP Serializers ─────────────────────────────────────
+
+class TelegramQRGenerateSerializer(serializers.Serializer):
+    """Generate QR code for Telegram OTP verification."""
+    purpose = serializers.ChoiceField(choices=['registration', 'forgot_password', 'reset_password'])
+    email = serializers.EmailField(required=False, allow_blank=True)  # For forgot password
+    
+    def validate(self, data):
+        if data['purpose'] in ['forgot_password', 'reset_password'] and not data.get('email'):
+            raise serializers.ValidationError("Email is required for password recovery.")
+        return data
+
+
+class TelegramOTPVerifySerializer(serializers.Serializer):
+    """Verify OTP and complete authentication flow."""
+    ref_id = serializers.CharField(max_length=50)
+    otp_code = serializers.CharField(max_length=6, min_length=6)
+    username = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    
+    def validate_otp_code(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP must contain only digits.")
+        return value
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """Request password reset via OTP."""
+    email = serializers.EmailField()
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """Verify OTP and set new password."""
+    ref_id = serializers.CharField(max_length=50)
+    otp_code = serializers.CharField(max_length=6, min_length=6)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    confirm_password = serializers.CharField(write_only=True, min_length=8)
+    
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+        return data

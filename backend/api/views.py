@@ -1,7 +1,9 @@
 from datetime import date, timedelta
+import threading
 import logging
-
+import os
 from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
 from django.db.models import Max, Min, Q
 from rest_framework import mixins, status, viewsets
 from rest_framework.authtoken.models import Token
@@ -11,12 +13,23 @@ from rest_framework.response import Response
 
 from api.serializers import (
     AddStockToPortfolioSerializer,
+    ForgotPasswordSerializer,
     LoginSerializer,
     PortfolioSerializer,
     PredictionRunSerializer,
     RegisterSerializer,
+    ResetPasswordSerializer,
     StockDetailSerializer,
     StockListSerializer,
+    TelegramOTPVerifySerializer,
+    TelegramQRGenerateSerializer,
+)
+from accounts.models import TelegramOTP
+from accounts.telegram_utils import (
+    generate_qr_code_with_ref,
+    send_otp_via_telegram,
+    send_password_reset_message,
+    send_telegram_update_response,
 )
 from analytics.data_access import (
     get_fundamentals_bulk,
@@ -51,29 +64,36 @@ class AuthViewSet(viewsets.GenericViewSet):
     permission_classes = [AllowAny]
     serializer_class = RegisterSerializer
 
+    def _create_portfolios_safe(self, user):
+        """Create default portfolios in background without breaking auth flow."""
+        try:
+            create_default_portfolios_for_user(user)
+        except Exception as e:
+            logger.error(f"Failed to create default portfolios for user_id={user.id}: {str(e)}")
+
     def get_serializer_class(self):
         if self.action == "login":
             return LoginSerializer
+        elif self.action == "telegram_generate_qr":
+            return TelegramQRGenerateSerializer
+        elif self.action == "telegram_verify_otp":
+            return TelegramOTPVerifySerializer
+        elif self.action == "forgot_password":
+            return ForgotPasswordSerializer
+        elif self.action == "reset_password":
+            return ResetPasswordSerializer
         return RegisterSerializer
 
     @action(detail=False, methods=["post"], url_path="register")
     def register(self, request):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        token, _ = Token.objects.get_or_create(user=user)
-        
-        # Create default portfolios for new user
-        create_default_portfolios_for_user(user)
-        
+        # Registration MUST be performed through Telegram OTP flow.
+        # The `/telegram-otp/generate-qr/` and `/telegram-otp/verify/` endpoints
+        # enforce OTP verification before user creation.
         return Response(
             {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "token": token.key,
+                "detail": "Registration requires Telegram OTP verification. Use /telegram-register flow." 
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_403_FORBIDDEN,
         )
 
     @action(detail=False, methods=["post"], url_path="login")
@@ -91,9 +111,10 @@ class AuthViewSet(viewsets.GenericViewSet):
             )
         token, _ = Token.objects.get_or_create(user=user)
         
-        # Create default portfolios on first login if missing
+        # Create default portfolios asynchronously if missing
         if not user_has_default_portfolios(user):
-            create_default_portfolios_for_user(user)
+            thread = threading.Thread(target=self._create_portfolios_safe, args=(user,), daemon=True)
+            thread.start()
             
         return Response(
             {
@@ -103,6 +124,336 @@ class AuthViewSet(viewsets.GenericViewSet):
                 "token": token.key,
             }
         )
+
+    # ─── Telegram OTP Endpoints ───────────────────────────────────────
+
+    def telegram_generate_qr(self, request):
+        """Generate QR code for Telegram OTP verification."""
+        serializer = TelegramQRGenerateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        purpose = serializer.validated_data["purpose"]
+        email = serializer.validated_data.get("email")
+        
+        try:
+            # Generate reference ID and OTP
+            ref_id = TelegramOTP.generate_ref_id()
+            otp_code = TelegramOTP.generate_otp()
+            expires_at = TelegramOTP.generate_expiry()
+            
+            # Create OTP record
+            otp_obj = TelegramOTP.objects.create(
+                ref_id=ref_id,
+                otp_code=otp_code,
+                expires_at=expires_at,
+                purpose=purpose,
+                email=email,
+            )
+            
+            # Generate QR code
+            qr_data = generate_qr_code_with_ref(ref_id)
+            
+            return Response(
+                {
+                    "ref_id": ref_id,
+                    "qr_code_base64": qr_data["qr_code_base64"],
+                    "telegram_url": qr_data["telegram_url"],
+                    "expires_in_seconds": 600,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate QR code: {str(e)}")
+            return Response(
+                {"detail": "Failed to generate QR code. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def telegram_verify_otp(self, request):
+        """Verify OTP and complete registration/password reset."""
+        serializer = TelegramOTPVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        ref_id = serializer.validated_data["ref_id"]
+        otp_code = serializer.validated_data["otp_code"]
+        username = serializer.validated_data.get("username", "").strip()
+        password = serializer.validated_data.get("password", "").strip()
+        email = serializer.validated_data.get("email", "").strip()
+        
+        try:
+            # Get OTP record
+            otp_obj = TelegramOTP.objects.get(ref_id=ref_id)
+
+            # Handle different purposes
+            if otp_obj.purpose == "registration":
+                has_details = all([username, password, email])
+
+                # If OTP was not verified earlier, validate it now.
+                if not otp_obj.is_verified:
+                    if not otp_obj.is_valid(otp_code):
+                        return Response(
+                            {"detail": "Invalid or expired OTP."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # Phase 1: OTP-only verification (unlock account details step).
+                    if not has_details:
+                        otp_obj.mark_verified()
+                        return Response(
+                            {
+                                "message": "OTP verified. Continue to enter account details.",
+                                "ref_id": ref_id,
+                            },
+                            status=status.HTTP_200_OK,
+                        )
+                else:
+                    # Already verified from phase 1.
+                    if not has_details:
+                        return Response(
+                            {
+                                "message": "OTP already verified. Continue to enter account details.",
+                                "ref_id": ref_id,
+                            },
+                            status=status.HTTP_200_OK,
+                        )
+
+                if otp_obj.user_id:
+                    return Response(
+                        {"detail": "This OTP session is already used for registration."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Validate required fields for registration
+                if not has_details:
+                    return Response(
+                        {"detail": "Username, password, and email are required."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                
+                # Check if user already exists
+                if User.objects.filter(username=username).exists():
+                    return Response(
+                        {"detail": "Username already exists."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                
+                # Create user
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=password,
+                )
+                
+                # Mark OTP as verified/consumed
+                otp_obj.user = user
+                otp_obj.mark_verified()
+                
+                # Get/create token
+                token, _ = Token.objects.get_or_create(user=user)
+                
+                # Create default portfolios asynchronously
+                thread = threading.Thread(target=self._create_portfolios_safe, args=(user,), daemon=True)
+                thread.start()
+                
+                return Response(
+                    {
+                        "id": user.id,
+                        "username": user.username,
+                        "email": user.email,
+                        "token": token.key,
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
+            
+            elif otp_obj.purpose == "reset_password":
+                # Validate OTP
+                if not otp_obj.is_valid(otp_code):
+                    return Response(
+                        {"detail": "Invalid or expired OTP."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                # For password reset - OTP is verified, password will be set in next step
+                otp_obj.mark_verified()
+                
+                return Response(
+                    {
+                        "message": "OTP verified. Proceed to set new password.",
+                        "ref_id": ref_id,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            
+            else:
+                return Response(
+                    {"detail": "Invalid purpose."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        
+        except TelegramOTP.DoesNotExist:
+            return Response(
+                {"detail": "Invalid reference ID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            logger.error(f"OTP verification failed: {str(e)}")
+            return Response(
+                {"detail": "OTP verification failed. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=False, methods=["post"], url_path="telegram-webhook", permission_classes=[AllowAny])
+    def telegram_webhook(self, request):
+        """Handle incoming Telegram bot webhook updates for /start flow."""
+        print("WEBHOOK HIT:", request.data)
+        data = request.data
+        message = data.get("message") or data.get("edited_message")
+
+        if not message:
+            # A non-message update (inline query / callback query) is ignored.
+            return Response({"status": "ignored"}, status=status.HTTP_200_OK)
+
+        text = (message.get("text") or "").strip()
+        chat = message.get("chat", {})
+        from_user = message.get("from", {})
+        chat_id = chat.get("id")
+
+        if not text.startswith("/start") or not chat_id:
+            return Response({"status": "no-action"}, status=status.HTTP_200_OK)
+
+        ref_id = text.replace("/start", "", 1).strip().split()[0] if len(text.split()) > 1 else ""
+        if not ref_id:
+            send_telegram_update_response(chat_id, "Please use the QR code from AUTO INVEST to start registration.")
+            return Response({"status": "missing_ref"}, status=status.HTTP_200_OK)
+
+        try:
+            otp_obj = TelegramOTP.objects.filter(ref_id=ref_id, is_verified=False).last()
+            if not otp_obj:
+                send_telegram_update_response(chat_id, "This code is invalid or has expired. Please try again.")
+                return Response({"status": "invalid_ref"}, status=status.HTTP_200_OK)
+
+            if otp_obj.is_expired():
+                send_telegram_update_response(chat_id, "The OTP session has expired. Please request a new QR code.")
+                return Response({"status": "expired"}, status=status.HTTP_200_OK)
+
+            otp_obj.telegram_user_id = str(chat_id)
+            otp_obj.telegram_username = from_user.get("username") or from_user.get("first_name")
+            otp_obj.save()
+
+            sent = send_otp_via_telegram(chat_id, otp_obj.otp_code, ref_id=ref_id)
+            if not sent:
+                logger.error(f"Failed to send OTP via Telegram for ref_id={ref_id} chat_id={chat_id}")
+                return Response({"status": "otp_send_failed"}, status=status.HTTP_200_OK)
+            return Response({"status": "otp_sent"}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Telegram webhook processing failed: {str(e)}")
+            return Response({"status": "error", "detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def forgot_password(self, request):
+        """Initiate forgot password flow."""
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data["email"]
+        
+        try:
+            # Check if user exists
+            user = User.objects.filter(email=email).first()
+            
+            if not user:
+                # Don't reveal if email exists for security
+                return Response(
+                    {"message": "If an account exists, you will receive instructions."},
+                    status=status.HTTP_200_OK,
+                )
+            
+            # Create OTP for password reset
+            ref_id = TelegramOTP.generate_ref_id()
+            otp_code = TelegramOTP.generate_otp()
+            expires_at = TelegramOTP.generate_expiry()
+            
+            otp_obj = TelegramOTP.objects.create(
+                ref_id=ref_id,
+                otp_code=otp_code,
+                expires_at=expires_at,
+                purpose='reset_password',
+                email=email,
+                user=user,
+            )
+            
+            # Generate QR code for Telegram
+            qr_data = generate_qr_code_with_ref(ref_id)
+            
+            return Response(
+                {
+                    "ref_id": ref_id,
+                    "qr_code_base64": qr_data["qr_code_base64"],
+                    "telegram_url": qr_data["telegram_url"],
+                    "message": "Scan the QR code with Telegram to verify your identity.",
+                    "expires_in_seconds": 600,
+                },
+                status=status.HTTP_200_OK,
+            )
+        
+        except Exception as e:
+            logger.error(f"Forgot password failed: {str(e)}")
+            return Response(
+                {"detail": "Failed to initiate password reset. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def reset_password(self, request):
+        """Reset password after OTP verification."""
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        ref_id = serializer.validated_data["ref_id"]
+        otp_code = serializer.validated_data["otp_code"]
+        new_password = serializer.validated_data["new_password"]
+        
+        try:
+            otp_obj = TelegramOTP.objects.get(ref_id=ref_id)
+            
+            # Validate OTP
+            if not otp_obj.is_valid(otp_code):
+                return Response(
+                    {"detail": "Invalid or expired OTP."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            # Get user and reset password
+            user = otp_obj.user
+            if not user:
+                return Response(
+                    {"detail": "User not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            
+            user.set_password(new_password)
+            user.save()
+            
+            # Mark OTP as verified
+            otp_obj.mark_verified()
+            
+            # Send confirmation via Telegram
+            send_password_reset_message(otp_obj.telegram_user_id)
+            
+            return Response(
+                {"message": "Password reset successful. You can now login with your new password."},
+                status=status.HTTP_200_OK,
+            )
+        
+        except TelegramOTP.DoesNotExist:
+            return Response(
+                {"detail": "Invalid reference ID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            logger.error(f"Password reset failed: {str(e)}")
+            return Response(
+                {"detail": "Password reset failed. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class PortfolioViewSet(

@@ -3,6 +3,8 @@ import Navbar from "./components/Navbar";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import TelegramRegister from "./pages/TelegramRegister";
+import TelegramForgotPassword from "./pages/TelegramForgotPassword";
 import Portfolio from "./pages/Portfolio";
 import PortfolioClusters from "./pages/PortfolioClusters";
 import Stocks from "./pages/Stocks";
@@ -24,7 +26,9 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/portfolio" replace />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+            <Route path="/register" element={<Navigate to="/telegram-register" replace />} />
+            <Route path="/telegram-register" element={<TelegramRegister />} />
+            <Route path="/telegram-forgot-password" element={<TelegramForgotPassword />} />
             <Route
               path="/portfolio"
               element={

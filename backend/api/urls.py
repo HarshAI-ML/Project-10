@@ -19,6 +19,32 @@ urlpatterns = [
         AuthViewSet.as_view({"post": "login"}),
         name="login",
     ),
+    # Telegram OTP endpoints
+    path(
+        "telegram-otp/generate-qr/",
+        AuthViewSet.as_view({"post": "telegram_generate_qr"}),
+        name="telegram-generate-qr",
+    ),
+    path(
+        "telegram-otp/verify/",
+        AuthViewSet.as_view({"post": "telegram_verify_otp"}),
+        name="telegram-verify-otp",
+    ),
+    path(
+        "telegram-webhook/",
+        AuthViewSet.as_view({"post": "telegram_webhook"}),
+        name="telegram-webhook",
+    ),
+    path(
+        "forgot-password/",
+        AuthViewSet.as_view({"post": "forgot_password"}),
+        name="forgot-password",
+    ),
+    path(
+        "reset-password/",
+        AuthViewSet.as_view({"post": "reset_password"}),
+        name="reset-password",
+    ),
     path(
         "prediction/",
         PredictionViewSet.as_view({"get": "list"}),
