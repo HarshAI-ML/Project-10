@@ -28,3 +28,5 @@
     python-decouple
     beautifulsoup4
     websockets
+    qrcode
+    pillow
