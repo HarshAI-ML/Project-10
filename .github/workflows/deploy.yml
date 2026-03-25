@@ -1,9 +1,10 @@
-name: Deploy auto_invest_AI to Azure VM
+name: Deploy Project-10 to Azure VM
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -13,7 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Copy files to VM via SCP
+      - name: Copy project to VM
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -24,7 +25,7 @@ jobs:
           target: ${{ secrets.SERVER_PATH }}
           rm: false
 
-      - name: Run deployment commands on VM
+      - name: Deploy on VM
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -32,32 +33,59 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            set -e
+            set -euo pipefail
+
+            APP_DIR="${{ secrets.SERVER_PATH }}"
+            BACKEND_DIR="$APP_DIR/backend"
+            FRONTEND_DIR="$APP_DIR/frontend"
+            PM2_APP_NAME="${{ secrets.PM2_APP_NAME }}"
+            if [ -z "$PM2_APP_NAME" ]; then
+              PM2_APP_NAME="project10"
+            fi
+
+            echo "=== Ensure directories ==="
+            mkdir -p "$BACKEND_DIR/logs"
 
             echo "=== Write backend .env ==="
-            cat > /home/azureuser/auto-invest-ai/backend/.env << 'ENVEOF'
-            DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}"
-            DJANGO_DEBUG="False"
-            DJANGO_ALLOWED_HOSTS="98.70.29.114 autoinvestapi.duckdns.org autoinvest.duckdns.org localhost 127.0.0.1"
-            CORS_ALLOWED_ORIGINS="http://autoinvest.duckdns.org http://autoinvestapi.duckdns.org http://98.70.29.114 http://localhost:5173"
-            CORS_ALLOW_ALL_ORIGINS="True"
-            ENVEOF
+            if [ -n "${{ secrets.BACKEND_ENV }}" ]; then
+              printf '%s\n' "${{ secrets.BACKEND_ENV }}" > "$BACKEND_DIR/.env"
+            else
+              {
+                printf '%s\n' "DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}"
+                printf '%s\n' "DJANGO_DEBUG=False"
+                printf '%s\n' "DJANGO_ALLOWED_HOSTS=98.70.29.114 autoinvestapi.duckdns.org autoinvest.duckdns.org localhost 127.0.0.1"
+                printf '%s\n' "CORS_ALLOWED_ORIGINS=https://autoinvest.duckdns.org https://autoinvestapi.duckdns.org http://localhost:5173"
+                printf '%s\n' "CORS_ALLOW_ALL_ORIGINS=True"
+              } > "$BACKEND_DIR/.env"
+            fi
 
-            echo "=== Backend: install deps + migrate ==="
-            cd /home/azureuser/auto-invest-ai/backend
+            echo "=== Backend: create venv (if needed) + install deps ==="
+            cd "$BACKEND_DIR"
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            venv/bin/pip install --upgrade pip setuptools wheel --quiet
             venv/bin/pip install -r requirements-prod.txt --quiet
+
+            echo "=== Backend: migrate + collectstatic ==="
             venv/bin/python manage.py migrate --noinput
             venv/bin/python manage.py collectstatic --noinput
 
             echo "=== Frontend: write .env + build ==="
-            cd /home/azureuser/auto-invest-ai/frontend
-            echo "VITE_API_BASE_URL=http://autoinvestapi.duckdns.org/api/" > .env
-            npm install --silent
+            cd "$FRONTEND_DIR"
+            echo "VITE_API_BASE_URL=https://autoinvestapi.duckdns.org/api/" > .env
+            if [ -f package-lock.json ]; then
+              npm ci --silent
+            else
+              npm install --silent
+            fi
             npm run build
 
             echo "=== Restart app ==="
-            pm2 restart autoinvest || pm2 start /home/azureuser/auto-invest-ai/deploy/rungunicorn.sh --name autoinvest
+            chmod +x "$APP_DIR/deploy/rungunicorn.sh"
+            APP_DIR="$APP_DIR" SOCKET_PATH="$BACKEND_DIR/project10.sock" pm2 restart "$PM2_APP_NAME" --update-env || \
+            APP_DIR="$APP_DIR" SOCKET_PATH="$BACKEND_DIR/project10.sock" pm2 start "$APP_DIR/deploy/rungunicorn.sh" --name "$PM2_APP_NAME"
             pm2 save
             sudo systemctl restart nginx
 
-            echo "✅ Deployment complete!"
+            echo "Deployment complete."

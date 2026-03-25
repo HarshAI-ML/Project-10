@@ -1,6 +1,9 @@
 ssh -N -L 5433:localhost:5432 -i "c:\Huzaifa\bizz_python\ML_PROJECTS_GITT\autoinvest_pem_pem\auto-invest-vm_key.pem" azureuser@98.70.29.114
 
-
+ngrok token --> 3BOArNm2jVtu9UxrAnjn3kleiU3_4tcPqA3UEng4jykLNbTpo
+commands to run ngrok--> 
+-->  .\.tools\ngrok\ngrok.exe config add-authtoken <YOUR_NGROK_AUTHTOKEN>
+-->  .\.tools\ngrok\ngrok.exe http --url=uncalamitous-brody-uncorrectable.ngrok-free.dev 8000
 
 Likely unnecessary/redundant (candidate to remove)
 
