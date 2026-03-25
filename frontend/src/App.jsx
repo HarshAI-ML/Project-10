@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./routes/ProtectedRoute";
+import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import TelegramRegister from "./pages/TelegramRegister";
@@ -17,14 +18,15 @@ import AutoSignalCompany from "./pages/AutoSignalCompany";
 
 export default function App() {
   const location = useLocation();
+  const isHome = location.pathname === "/";
 
   return (
     <div className="min-h-screen">
-      <Navbar />
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      {!isHome && <Navbar />}
+      <main className={isHome ? "" : "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8"}>
         <div key={location.pathname} className="page-enter">
           <Routes>
-            <Route path="/" element={<Navigate to="/portfolio" replace />} />
+            <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Navigate to="/telegram-register" replace />} />
             <Route path="/telegram-register" element={<TelegramRegister />} />
@@ -109,7 +111,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="*" element={<Navigate to="/portfolio" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
       </main>
