@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import ChatWidget from "./components/ChatWidget";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
@@ -115,6 +116,7 @@ export default function App() {
           </Routes>
         </div>
       </main>
+      <ChatWidget />
     </div>
   );
 }

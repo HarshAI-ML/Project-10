@@ -404,3 +404,13 @@ class ResetPasswordSerializer(serializers.Serializer):
         if data['new_password'] != data['confirm_password']:
             raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
         return data
+
+
+class ChatMessageSerializer(serializers.Serializer):
+    message = serializers.CharField(max_length=2000)
+    session_id = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    history = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=list,
+    )

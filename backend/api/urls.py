@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from api.views import AuthViewSet, PortfolioViewSet, PredictionViewSet, StockViewSet, PortfolioStockViewSet
+from api.views import AuthViewSet, PortfolioViewSet, PredictionViewSet, StockViewSet, PortfolioStockViewSet, ChatbotAPIView
 
 router = DefaultRouter()
 router.register("portfolio", PortfolioViewSet, basename="portfolio")
@@ -54,6 +54,11 @@ urlpatterns = [
         "prediction/run/",
         PredictionViewSet.as_view({"post": "run"}),
         name="prediction-run",
+    ),
+    path(
+        "chat/",
+        ChatbotAPIView.as_view(),
+        name="chat",
     ),
     path("", include(router.urls)),
 ]

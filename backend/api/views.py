@@ -10,6 +10,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from api.serializers import (
     AddStockToPortfolioSerializer,
@@ -19,6 +20,7 @@ from api.serializers import (
     PredictionRunSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
+    ChatMessageSerializer,
     StockDetailSerializer,
     StockListSerializer,
     TelegramOTPVerifySerializer,
@@ -54,6 +56,7 @@ from analytics.services.yahoo_search import (
 from pipeline.models import SilverCleanedPrice
 from portfolio.models import Portfolio, PortfolioStock, Stock
 from portfolio.services import create_default_portfolios_for_user, user_has_default_portfolios
+from api.chatbot_service import generate_chat_response
 
 logger = logging.getLogger(__name__)
 
@@ -1058,3 +1061,21 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
         results = self._apply_diff_filters(results)
         results = self._apply_diff_sort(results)
         return Response(results)
+
+
+class ChatbotAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ChatMessageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        message = serializer.validated_data["message"]
+        history = serializer.validated_data.get("history", [])
+
+        payload = generate_chat_response(
+            user=request.user,
+            message=message,
+            history=history,
+        )
+        return Response(payload, status=status.HTTP_200_OK)
