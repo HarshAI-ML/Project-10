@@ -56,8 +56,10 @@ jobs:
             if [ -z "$DB_PORT" ]; then DB_PORT="5432"; fi
 
             if [ -n "${{ secrets.BACKEND_ENV }}" ]; then
+              echo "Using BACKEND_ENV secret to overwrite backend/.env"
               printf '%s\n' "${{ secrets.BACKEND_ENV }}" > "$BACKEND_DIR/.env"
-            else
+            elif [ -n "$DB_NAME" ] && [ -n "$DB_USER" ] && [ -n "$DB_PASSWORD" ] && [ -n "${{ secrets.DJANGO_SECRET_KEY }}" ]; then
+              echo "Using discrete GitHub secrets to generate backend/.env"
               {
                 printf '%s\n' "DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}"
                 printf '%s\n' "DJANGO_DEBUG=False"
@@ -70,10 +72,11 @@ jobs:
                 printf '%s\n' "DB_HOST=$DB_HOST"
                 printf '%s\n' "DB_PORT=$DB_PORT"
               } > "$BACKEND_DIR/.env"
-            fi
-
-            if ! grep -q '^DB_PASSWORD=' "$BACKEND_DIR/.env" || grep -q '^DB_PASSWORD=$' "$BACKEND_DIR/.env"; then
-              echo "ERROR: DB_PASSWORD is missing in backend .env. Set BACKEND_ENV or DB_* GitHub secrets."
+            elif [ -f "$BACKEND_DIR/.env" ]; then
+              echo "DB secrets are incomplete. Keeping existing backend/.env on VM."
+            else
+              echo "ERROR: No backend/.env on VM and no complete DB secrets provided."
+              echo "Set BACKEND_ENV or set DJANGO_SECRET_KEY + DB_NAME + DB_USER + DB_PASSWORD secrets."
               exit 1
             fi
 
