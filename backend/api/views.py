@@ -840,12 +840,33 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
         "diff_pct": "expected_change_pct",
         "expected_change_pct": "expected_change_pct",
     }
+    FACTOR_ALIAS_MAP = {
+        "all": "all",
+        "gainers": "gainers",
+        "losers": "losers",
+        "buy": "buy",
+        "buy_signal": "buy",
+        "sell": "sell",
+        "sell_signal": "sell",
+        "hold": "hold",
+        "hold_signal": "hold",
+        "high_discount": "high_discount",
+        "high_disc": "high_discount",
+        "positive_sentiment": "positive_sentiment",
+        "pos_sent": "positive_sentiment",
+        "negative_sentiment": "negative_sentiment",
+        "neg_sent": "negative_sentiment",
+        "all_filters": "all",
+    }
 
     def get_queryset(self):
         portfolio_id = self.request.query_params.get("portfolio")
         qs = PortfolioStock.objects.filter(portfolio__user=self.request.user)
         if portfolio_id:
             qs = qs.filter(portfolio_id=portfolio_id)
+        geography = (self.request.query_params.get("geography") or "").strip().upper()
+        if geography in {"IN", "US"}:
+            qs = qs.filter(geography=geography)
         return qs.order_by("sector", "ticker")
 
     @staticmethod
@@ -903,8 +924,102 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
         rows_with_value.sort(key=lambda row: row.get(sort_by), reverse=reverse)
         return rows_with_value + rows_without_value
 
+    @staticmethod
+    def _normalize_signal(value):
+        normalized = str(value or "").strip().upper()
+        if not normalized:
+            return ""
+        if "BUY" in normalized:
+            return "BUY"
+        if "SELL" in normalized or "REDUCE" in normalized:
+            return "SELL"
+        if "HOLD" in normalized:
+            return "HOLD"
+        return normalized
+
+    def _resolve_factor_choice(self, raw_value, allowed_values, param_name):
+        value = (raw_value or "all").strip().lower()
+        if "," in value:
+            choices = [item.strip().lower() for item in value.split(",") if item.strip()]
+            non_all = [item for item in choices if item != "all"]
+            if len(non_all) > 1:
+                raise ValueError(f"Only one {param_name} factor can be selected at a time.")
+            value = non_all[0] if non_all else "all"
+        mapped = self.FACTOR_ALIAS_MAP.get(value, value)
+        if mapped not in allowed_values:
+            raise ValueError(f"Invalid {param_name} factor: {raw_value}")
+        return mapped
+
+    def _resolve_factor_filters(self):
+        qp = self.request.query_params
+        legacy = (qp.get("quick_filter") or "").strip().lower()
+
+        trend = qp.get("trend")
+        signal = qp.get("signal")
+        discount = qp.get("discount")
+        sentiment = qp.get("sentiment")
+
+        legacy_map = {
+            "all": {},
+            "gainers": {"trend": "gainers"},
+            "losers": {"trend": "losers"},
+            "buy": {"signal": "buy"},
+            "sell": {"signal": "sell"},
+            "hold": {"signal": "hold"},
+            "high_disc": {"discount": "high_discount"},
+            "pos_sent": {"sentiment": "positive_sentiment"},
+            "neg_sent": {"sentiment": "negative_sentiment"},
+        }
+
+        if legacy and legacy in legacy_map:
+            legacy_values = legacy_map[legacy]
+            trend = trend or legacy_values.get("trend")
+            signal = signal or legacy_values.get("signal")
+            discount = discount or legacy_values.get("discount")
+            sentiment = sentiment or legacy_values.get("sentiment")
+
+        resolved = {
+            "trend": self._resolve_factor_choice(trend, {"all", "gainers", "losers"}, "trend"),
+            "signal": self._resolve_factor_choice(signal, {"all", "buy", "sell", "hold"}, "signal"),
+            "discount": self._resolve_factor_choice(discount, {"all", "high_discount"}, "discount"),
+            "sentiment": self._resolve_factor_choice(sentiment, {"all", "positive_sentiment", "negative_sentiment"}, "sentiment"),
+        }
+
+        return resolved
+
+    def _apply_factor_filters(self, rows):
+        try:
+            factors = self._resolve_factor_filters()
+        except ValueError as exc:
+            raise exc
+
+        if factors["trend"] != "all":
+            if factors["trend"] == "gainers":
+                rows = [row for row in rows if row.get("expected_change_pct") is not None and row.get("expected_change_pct") > 0]
+            elif factors["trend"] == "losers":
+                rows = [row for row in rows if row.get("expected_change_pct") is not None and row.get("expected_change_pct") < 0]
+
+        if factors["signal"] != "all":
+            rows = [
+                row
+                for row in rows
+                if self._normalize_signal(row.get("recommended_action") or row.get("signal")) == factors["signal"].upper()
+            ]
+
+        if factors["discount"] == "high_discount":
+            rows = [row for row in rows if str(row.get("discount_level") or "").upper() == "HIGH"]
+
+        if factors["sentiment"] != "all":
+            target = "Positive" if factors["sentiment"] == "positive_sentiment" else "Negative"
+            rows = [row for row in rows if str(row.get("sentiment_label") or "").strip() == target]
+
+        return rows
+
     def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
+        try:
+            qs = self.get_queryset()
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         tickers = list(qs.values_list("ticker", flat=True))
 
         latest_dates = (
@@ -976,6 +1091,12 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                     exp_change = round(daily_ret * 100, 2) if daily_ret is not None else None
                 predicted_price = forecast_data.get("predicted_price")
                 current_price = silver.get("close")
+                max_price = rng.get("week_high")
+                discount_pct = (
+                    round(((max_price - current_price) / max_price) * 100, 2)
+                    if max_price not in (None, 0) and current_price is not None
+                    else None
+                )
                 price_diff = (
                     round(predicted_price - current_price, 4)
                     if predicted_price is not None and current_price is not None
@@ -1004,7 +1125,6 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "signal_confidence": signal_data.get("confidence"),
                         "sentiment_score": sent.get("sentiment_score"),
                         "sentiment_label": sent.get("sentiment_label"),
-                        "sentiment_source": sent.get("model_used"),
                         "pe_ratio": fund.get("trailing_pe"),
                         "forward_pe": fund.get("forward_pe"),
                         "profit_margin": fund.get("profit_margin"),
@@ -1014,6 +1134,7 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "eps_trailing": fund.get("eps_trailing"),
                         "return_on_equity": fund.get("return_on_equity"),
                         "discount_level": insight.get("discount_level"),
+                        "discount_pct": discount_pct,
                         "rsi_14": signal_data.get("rsi_14") or silver.get("rsi_14"),
                         "ma_20": silver.get("ma_20"),
                         "macd": silver.get("macd"),
@@ -1042,7 +1163,6 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "signal_confidence": None,
                         "sentiment_score": None,
                         "sentiment_label": None,
-                        "sentiment_source": None,
                         "pe_ratio": None,
                         "forward_pe": None,
                         "profit_margin": None,
@@ -1052,11 +1172,17 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
                         "eps_trailing": None,
                         "return_on_equity": None,
                         "discount_level": None,
+                        "discount_pct": None,
                         "rsi_14": None,
                         "ma_20": None,
                         "macd": None,
                     }
                 )
+
+        try:
+            results = self._apply_factor_filters(results)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         results = self._apply_diff_filters(results)
         results = self._apply_diff_sort(results)

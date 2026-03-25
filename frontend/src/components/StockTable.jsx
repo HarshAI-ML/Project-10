@@ -89,9 +89,8 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
               <SortableHeader col="recommended_action" label="Signal" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
               <SortableHeader col="model_confidence_r2" label="R²" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
               <SortableHeader col="pe_ratio" label="PE" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
-              <SortableHeader col="discount_level" label="Discount" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
+              <SortableHeader col="discount_pct" label="Discount %" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
               <SortableHeader col="sentiment_score" label="Sentiment" sortCol={sortCol} sortDir={sortDir} onSort={onSort} />
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Source</th>
               <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider whitespace-nowrap">Action</th>
             </tr>
           </thead>
@@ -174,18 +173,21 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
                   <td className="px-4 py-3 text-right text-sm text-slate-500">{stock.pe_ratio ?? "—"}</td>
 
                   <td className="px-4 py-3">
-                    {stock.discount_level && (
+                    {stock.discount_pct !== null && stock.discount_pct !== undefined ? (
                       <span
                         className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                          stock.discount_level === "HIGH"
+                          Number(stock.discount_pct) >= 20
                             ? "bg-emerald-100 text-emerald-700"
-                            : stock.discount_level === "MEDIUM"
-                            ? "bg-amber-100 text-amber-600"
-                            : "bg-rose-100 text-rose-500"
+                            : Number(stock.discount_pct) >= 10
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-rose-100 text-rose-600"
                         }`}
                       >
-                        {stock.discount_level}
+                        {Number(stock.discount_pct) >= 0 ? "+" : ""}
+                        {Number(stock.discount_pct).toFixed(2)}%
                       </span>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
                     )}
                   </td>
 
@@ -206,8 +208,6 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
                       <span className="text-xs text-slate-400">—</span>
                     )}
                   </td>
-
-                  <td className="px-4 py-3 text-left text-xs text-slate-500">{stock.sentiment_source || "—"}</td>
 
                   <td className="px-4 py-3 text-right">
                     {stock.symbol && (

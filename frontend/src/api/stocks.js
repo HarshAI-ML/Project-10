@@ -27,6 +27,11 @@ export const fetchStocks = async (portfolioId = null, options = {}) => {
     const queryParams = new URLSearchParams({
       portfolio: String(portfolioId),
     });
+    if (options.geography && options.geography !== "all") queryParams.set("geography", String(options.geography));
+    if (options.trend && options.trend !== "all") queryParams.set("trend", String(options.trend));
+    if (options.signal && options.signal !== "all") queryParams.set("signal", String(options.signal));
+    if (options.discount && options.discount !== "all") queryParams.set("discount", String(options.discount));
+    if (options.sentiment && options.sentiment !== "all") queryParams.set("sentiment", String(options.sentiment));
     if (options.sort_by) queryParams.set("sort_by", String(options.sort_by));
     if (options.sort_order) queryParams.set("sort_order", String(options.sort_order));
     if (options.diff_sign) queryParams.set("diff_sign", String(options.diff_sign));
@@ -62,7 +67,6 @@ export const fetchStocks = async (portfolioId = null, options = {}) => {
       recommended_action: item.recommended_action,
       sentiment_score: item.sentiment_score,
       sentiment_label: item.sentiment_label,
-      sentiment_source: item.sentiment_source,
       prediction_status:
         item.prediction_status ||
         (item.predicted_price_1d !== null && item.predicted_price_1d !== undefined
@@ -70,6 +74,7 @@ export const fetchStocks = async (portfolioId = null, options = {}) => {
           : "insufficient_data"),
       pe_ratio: item.pe_ratio,
       discount_level: item.discount_level,
+      discount_pct: item.discount_pct,
       rsi_14: item.rsi_14,
       ma_20: item.ma_20,
       macd: item.macd,

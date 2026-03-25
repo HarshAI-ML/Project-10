@@ -55,8 +55,11 @@ export default function Stocks() {
   const [openingClusters, setOpeningClusters] = useState(false);
   const [chartMode, setChartMode] = useState("pe");
 
-  // Bloomberg-style filtering state
-  const [quickFilter, setQuickFilter] = useState('all');
+  // Server-side factor filters
+  const [trendFilter, setTrendFilter] = useState("all");
+  const [signalFilter, setSignalFilter] = useState("all");
+  const [discountFilter, setDiscountFilter] = useState("all");
+  const [sentimentFilter, setSentimentFilter] = useState("all");
   const [geography, setGeography] = useState('all');
   const [sortCol, setSortCol] = useState('expected_change_pct');
   const [sortDir, setSortDir] = useState('desc');
@@ -94,7 +97,17 @@ export default function Stocks() {
     () => new Set(stocks.map((s) => String(s.symbol).toUpperCase())),
     [stocks]
   );
-  // Filtered and sorted stocks using client-side Bloomberg-style filters
+  const stockFetchOptions = useMemo(
+    () => ({
+      geography,
+      trend: trendFilter,
+      signal: signalFilter,
+      discount: discountFilter,
+      sentiment: sentimentFilter,
+    }),
+    [geography, trendFilter, signalFilter, discountFilter, sentimentFilter]
+  );
+  // Advanced filters stay client-side after server-side factor filtering.
   const filteredStocks = useMemo(() => {
     let result = [...stocks];
 
@@ -103,36 +116,7 @@ export default function Stocks() {
       result = result.filter(s => s.geography === geography);
     }
 
-    // 2. Quick filter chip
-    switch (quickFilter) {
-      case 'gainers':
-        result = result.filter(s => (s.expected_change_pct || 0) > 0);
-        break;
-      case 'losers':
-        result = result.filter(s => (s.expected_change_pct || 0) < 0);
-        break;
-      case 'buy':
-        result = result.filter(s => s.recommended_action === 'BUY');
-        break;
-      case 'sell':
-        result = result.filter(s => s.recommended_action === 'SELL');
-        break;
-      case 'hold':
-        result = result.filter(s => s.recommended_action === 'HOLD');
-        break;
-      case 'high_disc':
-        result = result.filter(s => s.discount_level === 'HIGH');
-        break;
-      case 'pos_sent':
-        result = result.filter(s => s.sentiment_label === 'Positive');
-        break;
-      case 'neg_sent':
-        result = result.filter(s => s.sentiment_label === 'Negative');
-        break;
-      // 'all' case: no filter
-    }
-
-    // 3. Advanced filters
+    // 2. Advanced filters
     if (advFilters.peMin !== '') {
       result = result.filter(s => s.pe_ratio != null && s.pe_ratio >= Number(advFilters.peMin));
     }
@@ -158,9 +142,8 @@ export default function Stocks() {
       result = result.filter(s => advFilters.discountLevels.includes(s.discount_level || '—'));
     }
 
-    // 4. Sorting
+    // 3. Sorting
     const signalOrder = { BUY: 3, HOLD: 2, SELL: 1, null: 0, undefined: 0 };
-    const discOrder = { HIGH: 3, MEDIUM: 2, LOW: 1, null: 0, undefined: 0 };
 
     result.sort((a, b) => {
       let aVal, bVal;
@@ -197,9 +180,9 @@ export default function Stocks() {
           aVal = a.sentiment_score ?? -1;
           bVal = b.sentiment_score ?? -1;
           break;
-        case 'discount_level':
-          aVal = discOrder[a.discount_level] || 0;
-          bVal = discOrder[b.discount_level] || 0;
+        case 'discount_pct':
+          aVal = a.discount_pct ?? -Infinity;
+          bVal = b.discount_pct ?? -Infinity;
           break;
         default:
           aVal = 0;
@@ -220,7 +203,7 @@ export default function Stocks() {
     });
 
     return result;
-  }, [stocks, quickFilter, geography, sortCol, sortDir, advFilters]);
+  }, [stocks, geography, sortCol, sortDir, advFilters]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -229,7 +212,7 @@ export default function Stocks() {
       try {
         const [portfolioData, stockData] = await Promise.all([
           fetchPortfolio(),
-          fetchStocks(portfolioId), // No options - fetch all stocks, filter client-side
+          fetchStocks(portfolioId, stockFetchOptions),
         ]);
         const pArr = Array.isArray(portfolioData) ? portfolioData : [];
         const sArr = Array.isArray(stockData) ? stockData : [];
@@ -253,7 +236,7 @@ export default function Stocks() {
       return;
     }
     loadData();
-  }, [navigate, portfolioId]);
+  }, [navigate, portfolioId, stockFetchOptions]);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -274,7 +257,7 @@ export default function Stocks() {
     setError("");
     try {
       await addStockToPortfolio(portfolioId, String(symbol).trim().toUpperCase());
-      setStocks((await fetchStocks(portfolioId)) || []);
+      setStocks((await fetchStocks(portfolioId, stockFetchOptions)) || []);
       setMessage(`${symbol} added to portfolio.`);
     } catch (err) {
       setError(err.response?.data?.detail || "Unable to add stock.");
@@ -288,7 +271,7 @@ export default function Stocks() {
     setError("");
     try {
       await removeStockFromPortfolio(portfolioId, symbol);
-      setStocks((await fetchStocks(portfolioId)) || []);
+      setStocks((await fetchStocks(portfolioId, stockFetchOptions)) || []);
       setMessage(`${symbol} removed.`);
     } catch (err) {
       setError(err.response?.data?.detail || "Unable to delete stock.");
@@ -373,32 +356,87 @@ export default function Stocks() {
         </button>
       </form>
 
-      {/* ── Quick Filter Chips ── */}
-      <div className="flex flex-wrap gap-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-        {[
-          { key: 'all', label: 'All' },
-          { key: 'gainers', label: 'Gainers' },
-          { key: 'losers', label: 'Losers' },
-          { key: 'buy', label: 'BUY Signal' },
-          { key: 'sell', label: 'SELL Signal' },
-          { key: 'hold', label: 'HOLD Signal' },
-          { key: 'high_disc', label: 'High Discount' },
-          { key: 'pos_sent', label: 'Positive Sentiment' },
-          { key: 'neg_sent', label: 'Negative Sentiment' },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setQuickFilter(key)}
-            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-              quickFilter === key
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* ── Factor Filters ── */}
+      <div className="space-y-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Trend:</span>
+          {[
+            { key: "all", label: "All" },
+            { key: "gainers", label: "Gainers" },
+            { key: "losers", label: "Losers" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTrendFilter(key)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                trendFilter === key ? "bg-indigo-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Signal:</span>
+          {[
+            { key: "all", label: "All" },
+            { key: "buy", label: "BUY Signal" },
+            { key: "sell", label: "SELL Signal" },
+            { key: "hold", label: "HOLD Signal" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSignalFilter(key)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                signalFilter === key ? "bg-indigo-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Discount:</span>
+          {[
+            { key: "all", label: "All" },
+            { key: "high_discount", label: "High Discount" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setDiscountFilter(key)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                discountFilter === key ? "bg-indigo-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sentiment:</span>
+          {[
+            { key: "all", label: "All" },
+            { key: "positive_sentiment", label: "Positive Sentiment" },
+            { key: "negative_sentiment", label: "Negative Sentiment" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSentimentFilter(key)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                sentimentFilter === key ? "bg-indigo-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Geography Toggle ── */}
@@ -602,9 +640,33 @@ export default function Stocks() {
         <div className="flex flex-wrap gap-2">
           {(() => {
             const tags = [];
-            if (quickFilter !== 'all') {
-              const label = quickFilter.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-              tags.push({ key: 'quick', label, clear: () => setQuickFilter('all') });
+            if (trendFilter !== "all") {
+              tags.push({
+                key: "trend",
+                label: `Trend: ${trendFilter.charAt(0).toUpperCase()}${trendFilter.slice(1)}`,
+                clear: () => setTrendFilter("all"),
+              });
+            }
+            if (signalFilter !== "all") {
+              tags.push({
+                key: "signal",
+                label: `Signal: ${signalFilter.toUpperCase()}`,
+                clear: () => setSignalFilter("all"),
+              });
+            }
+            if (discountFilter !== "all") {
+              tags.push({
+                key: "discount",
+                label: "Discount: High",
+                clear: () => setDiscountFilter("all"),
+              });
+            }
+            if (sentimentFilter !== "all") {
+              tags.push({
+                key: "sentiment",
+                label: `Sentiment: ${sentimentFilter === "positive_sentiment" ? "Positive" : "Negative"}`,
+                clear: () => setSentimentFilter("all"),
+              });
             }
             if (geography !== 'all') {
               tags.push({ key: 'geo', label: geography === 'IN' ? 'India' : 'US', clear: () => setGeography('all') });
