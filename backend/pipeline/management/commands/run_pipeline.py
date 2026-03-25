@@ -1,7 +1,8 @@
-﻿import logging
+import logging
 import traceback
 import uuid
 
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -47,6 +48,22 @@ class Command(BaseCommand):
             choices=["title", "both"],
             help="FinBERT input mode for sentiment: title only (fast) or title+description (balanced).",
         )
+        parser.add_argument(
+            "--with-analytics",
+            action="store_true",
+            help="Also run run_analytics at the end of pipeline execution.",
+        )
+        parser.add_argument(
+            "--analytics-skip-prediction",
+            action="store_true",
+            help="When used with --with-analytics, skip prediction refresh in run_analytics.",
+        )
+        parser.add_argument(
+            "--analytics-limit",
+            type=int,
+            default=0,
+            help="When used with --with-analytics, process only first N stocks in run_analytics (0 = all).",
+        )
 
     def _run_silver(self, run):
         self.stdout.write("\n[Silver] Processing Bronze -> Silver (cleaning + indicators)...")
@@ -60,6 +77,7 @@ class Command(BaseCommand):
     def _run_news(self, run):
         self.stdout.write("\n[2/2] Fetching news...")
         from pipeline.fetchers.news_fetcher import fetch_and_store_news
+
         result = fetch_and_store_news()
         self.stdout.write(
             f"  News done: {result['new']} new articles | "
@@ -110,18 +128,32 @@ class Command(BaseCommand):
             )
         )
 
+    def _run_analytics(self, skip_prediction=False, limit=0):
+        self.stdout.write(
+            f"\n[Analytics] Running stock analytics refresh "
+            f"(skip_prediction={skip_prediction}, limit={limit or 'all'})..."
+        )
+        call_command(
+            "run_analytics",
+            skip_prediction=bool(skip_prediction),
+            limit=int(limit or 0),
+        )
+
     def handle(self, *args, **options):
         mode = options["mode"]
         period = options["period"]
         interval = options["interval"]
         text_mode = options["text_mode"]
+        with_analytics = bool(options.get("with_analytics"))
+        analytics_skip_prediction = bool(options.get("analytics_skip_prediction"))
+        analytics_limit = int(options.get("analytics_limit") or 0)
 
         self.stdout.write(self.style.SUCCESS(f"Starting pipeline run (Mode: {mode}, Period: {period})"))
 
         run_record = PipelineRun.objects.create(
             run_id=uuid.uuid4().hex,
             run_type=mode,
-            status="RUNNING",
+            status="running",
             started_at=timezone.now(),
         )
 
@@ -145,16 +177,23 @@ class Command(BaseCommand):
             if mode in ["sentiment", "all"]:
                 self._run_sentiment(run_record, text_mode=text_mode)
 
-            run_record.status = "SUCCESS"
-            run_record.message = f"Pipeline {mode} finished successfully."
+            if with_analytics:
+                self._run_analytics(
+                    skip_prediction=analytics_skip_prediction,
+                    limit=analytics_limit,
+                )
 
-        except Exception as e:
-            logger.error(f"Pipeline failed: {e}")
+            run_record.status = "success"
+            run_record.notes = f"Pipeline {mode} finished successfully."
+
+        except Exception as exc:
+            logger.error("Pipeline failed: %s", exc)
             logger.error(traceback.format_exc())
-            run_record.status = "FAILED"
-            run_record.message = str(e)
+            run_record.status = "failed"
+            run_record.error_log = traceback.format_exc()
+            run_record.notes = str(exc)
 
         finally:
             run_record.completed_at = timezone.now()
-            run_record.save()
+            run_record.save(update_fields=["status", "completed_at", "notes", "error_log"])
             self.stdout.write(self.style.SUCCESS(f"Pipeline run finished: {run_record.status}"))

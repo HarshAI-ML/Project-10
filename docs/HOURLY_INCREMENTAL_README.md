@@ -1,6 +1,7 @@
 # Hourly Incremental Fetch (`fetch_hourly_incremental`)
 
 This command performs incremental Bronze ingestion for prices (and optionally news) using per-ticker checkpoints.
+It can also chain downstream processing (Silver -> Gold -> analytics, and optional sentiment) in the same run.
 
 Command:
 
@@ -55,6 +56,20 @@ Skip news:
 python manage.py fetch_hourly_incremental --skip-news
 ```
 
+## 3) Downstream Processing (optional, enabled by default)
+
+After Bronze ingestion, the command now runs:
+
+- `run_pipeline --mode=silver`
+- `run_pipeline --mode=gold --with-analytics`
+- optional: `run_pipeline --mode=sentiment`
+
+Disable downstream chain:
+
+```bash
+python manage.py fetch_hourly_incremental --skip-downstream
+```
+
 ## Checkpointing + Progress
 
 Each run creates a `PipelineRun` row:
@@ -96,7 +111,9 @@ python manage.py fetch_hourly_incremental \
   --period 5d \
   --interval 1h \
   --sleep 0.2 \
-  --limit 50
+  --limit 50 \
+  --include-sentiment \
+  --text-mode title
 ```
 
 Arguments:
@@ -106,13 +123,18 @@ Arguments:
 - `--limit` (optional): process first N tickers only (debug/smoke).
 - `--skip-news` (flag): skip news fetch.
 - `--sleep` (default `0.2`): pause between tickers in seconds.
+- `--skip-downstream` (flag): skip Silver/Gold/analytics chain.
+- `--include-sentiment` (flag): run sentiment stage after Gold/analytics.
+- `--text-mode` (`title`/`both`, default `title`): sentiment FinBERT input mode.
+- `--analytics-limit` (default `0`): limit run_analytics stocks (0 = all).
+- `--analytics-with-prediction` (flag): include prediction refresh in downstream run_analytics.
 
 ## Typical Schedules
 
-Cron (Linux):
+Cron (Linux, full hourly chain):
 
 ```bash
-0 * * * * cd /path/to/backend && python manage.py fetch_hourly_incremental >> /var/log/fetch_hourly_cron.log 2>&1
+5 * * * * cd /home/azureuser/project10/backend && /home/azureuser/project10/backend/venv/bin/python manage.py fetch_hourly_incremental --include-sentiment --text-mode=title >> /home/azureuser/project10/logs/hourly_pipeline_cron.log 2>&1
 ```
 
 Windows Task Scheduler:
@@ -136,12 +158,5 @@ At run end, console prints:
 
 ## Notes
 
-- This command writes only Bronze layer data.
-- Silver/Gold are not recomputed here.
-- For full pipeline refresh after hourly ingestion, run:
-
-```bash
-python manage.py run_pipeline --mode=silver
-python manage.py run_pipeline --mode=gold
-```
-
+- Default behavior now includes downstream processing.
+- Use `--skip-downstream` if you want Bronze-only ingestion.

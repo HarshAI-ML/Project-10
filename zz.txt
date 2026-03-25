@@ -16,3 +16,52 @@ backend/portfolio/management/commands/complete_data.py
 backend/portfolio/management/commands/populate_prices.py
 backend/portfolio/management/commands/setup_all_data.py
 Reason they’re redundant: they directly fetch with yfinance or write Silver/legacy StockAnalytics outside the medallion pipeline.
+
+
+data SYNC FEATURE:
+Yes, we can add it, and it’s a good idea if done safely.
+
+My take:
+
+A “Refresh Hourly Data” bar/button on /stocks is useful for demos and manual ops.
+But the button should not run long fetch inline in the request thread.
+Best implementation:
+
+Add top info bar on Stocks page:
+“Last hourly sync: <time> | Status: <success/failed/running>”
+Button: Run Hourly Sync
+Backend endpoint should:
+Create a PipelineRun (run_type=hourly_incremental, status=running)
+Trigger command in background (Celery task or subprocess job queue)
+Return immediately with run_id
+Frontend:
+Poll /pipeline/runs/<run_id> every few seconds
+Show progress bar + ticker counts
+Disable button while running
+Show toast on completion
+Improvements I strongly recommend:
+
+Add role guard (admin/staff only)
+Add cooldown (e.g., block if last run < 10 mins)
+Add “already running” check so duplicate runs are prevented
+Show link to log/summary from PipelineRun.notes
+So: don’t ignore it. It’s valuable, but do it as an async job with progress UI, not direct blocking execution.
+If you want, I can implement this now end-to-end (backend endpoint + frontend top bar + progress polling).
+
+
+so you are saying this feature should only be available for admin/staff??
+
+
+
+For production: yes, ideally admin/staff only.
+
+Why:
+
+It hits external APIs and can be expensive/rate-limited.
+Regular users could spam it and degrade system reliability.
+It’s an operational/data-ingestion action, not a normal end-user action.
+Good compromise:
+
+Admin/staff: full “Run Hourly Sync” button.
+Normal users: read-only status bar (“Last updated …”, “Sync in progress …”).
+If this is just local/demo, we can temporarily allow all authenticated users and lock it down later.

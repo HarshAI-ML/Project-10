@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 from django.conf import settings
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -66,6 +67,79 @@ class Command(BaseCommand):
             default=0.2,
             help="Sleep between tickers in seconds. Default=0.2",
         )
+        parser.add_argument(
+            "--skip-downstream",
+            action="store_true",
+            help="Skip downstream Silver/Gold/analytics processing after Bronze incremental fetch.",
+        )
+        parser.add_argument(
+            "--include-sentiment",
+            action="store_true",
+            help="After Silver/Gold/analytics, also run sentiment pipeline.",
+        )
+        parser.add_argument(
+            "--text-mode",
+            type=str,
+            default="title",
+            choices=["title", "both"],
+            help="FinBERT input mode when --include-sentiment is enabled.",
+        )
+        parser.add_argument(
+            "--analytics-limit",
+            type=int,
+            default=0,
+            help="When running downstream analytics, process first N stocks only (0 = all).",
+        )
+        parser.add_argument(
+            "--analytics-with-prediction",
+            action="store_true",
+            help="When running downstream analytics, also refresh prediction in run_analytics.",
+        )
+
+    def _run_downstream(self, options, logger: logging.Logger) -> dict:
+        dlog = logging.LoggerAdapter(logger, {"ticker": "GLOBAL", "data_type": "downstream"})
+        result = {
+            "status": "success",
+            "silver": "not_run",
+            "gold_analytics": "not_run",
+            "sentiment": "not_run",
+            "error": "",
+        }
+
+        try:
+            dlog.info("Running downstream Silver pipeline stage")
+            call_command("run_pipeline", mode="silver")
+            result["silver"] = "success"
+
+            dlog.info("Running downstream Gold + analytics pipeline stage")
+            call_command(
+                "run_pipeline",
+                mode="gold",
+                with_analytics=True,
+                analytics_skip_prediction=not bool(options["analytics_with_prediction"]),
+                analytics_limit=int(options["analytics_limit"] or 0),
+            )
+            result["gold_analytics"] = "success"
+
+            if options["include_sentiment"]:
+                dlog.info("Running downstream sentiment pipeline stage (text_mode=%s)", options["text_mode"])
+                call_command("run_pipeline", mode="sentiment", text_mode=options["text_mode"])
+                result["sentiment"] = "success"
+            else:
+                result["sentiment"] = "skipped"
+
+        except Exception as exc:
+            dlog.error("Downstream pipeline failed: %s", exc)
+            result["status"] = "failed"
+            result["error"] = str(exc)
+            if result["silver"] == "not_run":
+                result["silver"] = "failed"
+            elif result["gold_analytics"] == "not_run":
+                result["gold_analytics"] = "failed"
+            elif options["include_sentiment"] and result["sentiment"] == "not_run":
+                result["sentiment"] = "failed"
+
+        return result
 
     def _setup_logger(self) -> tuple[logging.Logger, Path]:
         logs_dir = Path(settings.BASE_DIR) / "logs"
@@ -268,6 +342,7 @@ class Command(BaseCommand):
             "failed_tickers": [],
             "tickers": {},
             "news": {"fetched": 0, "new": 0, "skipped": 0, "status": "skipped"},
+            "downstream": {"status": "skipped"},
             "log_path": str(log_path),
         }
 
@@ -331,6 +406,9 @@ class Command(BaseCommand):
                 stats["news"] = {"status": "failed", "error": str(exc)}
                 nlog.error("News fetch failed: %s", exc)
 
+        if not options["skip_downstream"]:
+            stats["downstream"] = self._run_downstream(options, logger)
+
         ended = timezone.now()
         duration = ended - started
 
@@ -338,7 +416,11 @@ class Command(BaseCommand):
         stats["started_at"] = started.isoformat()
         stats["completed_at"] = ended.isoformat()
 
-        if stats["failed"] == 0 and stats["news"].get("status") != "failed":
+        if (
+            stats["failed"] == 0
+            and stats["news"].get("status") != "failed"
+            and stats["downstream"].get("status") != "failed"
+        ):
             final_status = "success"
         elif stats["successful"] > 0:
             final_status = "partial"

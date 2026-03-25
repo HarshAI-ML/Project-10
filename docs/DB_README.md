@@ -190,6 +190,10 @@ Layer-specific:
   - `run_pipeline --mode=gold`
 - Analytics refresh:
   - `run_analytics [--skip-prediction] [--limit N]`
+- Hourly incremental (Bronze + optional downstream chain):
+  - `fetch_hourly_incremental`
+  - Bronze-only mode: `fetch_hourly_incremental --skip-downstream`
+  - Full chained hourly mode (recommended for automation): `fetch_hourly_incremental --include-sentiment --text-mode=title`
 
 ## Serving Source of Truth
 
