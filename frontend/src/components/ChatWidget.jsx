@@ -1,29 +1,51 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { sendChatMessage } from "../api/chat";
 import { useAuth } from "../context/AuthContext";
 
+const buildWelcomeMessage = (isAuthenticated) => ({
+  role: "assistant",
+  content: isAuthenticated
+    ? "Hi, I can answer using your portfolio context. Ask me anything."
+    : "Hi, I am AUTO INVEST assistant. Ask me general market questions.",
+});
+
+const createSessionId = () => `s_${Math.random().toString(36).slice(2, 10)}`;
+
 export default function ChatWidget() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [messages, setMessages] = useState(() => [
-    {
-      role: "assistant",
-      content: isAuthenticated
-        ? "Hi, I can answer using your portfolio context. Ask me anything."
-        : "Hi, I am AUTO INVEST assistant. Ask me general market questions.",
-    },
+  const [messages, setMessages] = useState(() => [buildWelcomeMessage(isAuthenticated)]);
+
+  const identityKey = useMemo(() => (isAuthenticated ? `user:${user?.username || "unknown"}` : "guest"), [
+    isAuthenticated,
+    user?.username,
   ]);
 
-  const sessionId = useMemo(() => {
-    const key = "chat_session_id";
+  const [sessionId, setSessionId] = useState(() => {
+    const key = `chat_session_id:${identityKey}`;
     const existing = localStorage.getItem(key);
     if (existing) return existing;
-    const next = `s_${Math.random().toString(36).slice(2, 10)}`;
+    const next = createSessionId();
     localStorage.setItem(key, next);
     return next;
-  }, []);
+  });
+
+  useEffect(() => {
+    // Account changed (or guest/auth mode changed): start a fresh session + clear old in-memory chat.
+    setMessages([buildWelcomeMessage(isAuthenticated)]);
+    setInput("");
+    const key = `chat_session_id:${identityKey}`;
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      setSessionId(existing);
+      return;
+    }
+    const next = createSessionId();
+    localStorage.setItem(key, next);
+    setSessionId(next);
+  }, [identityKey, isAuthenticated]);
 
   const onSend = async () => {
     const text = input.trim();

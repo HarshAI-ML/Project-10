@@ -210,13 +210,24 @@ def _keyword_score(query: str, stock_row: Dict[str, Any]) -> int:
 
 
 def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
+    account_profile = {
+        "username": getattr(user, "username", "") or "",
+        "email": getattr(user, "email", "") or "",
+        "is_authenticated": bool(getattr(user, "is_authenticated", False)),
+    }
+
     portfolios = list(
         Portfolio.objects.filter(user=user)
         .values("id", "name", "geography", "is_default")
         .order_by("-is_default", "name")
     )
     if not portfolios:
-        return {"summary": {"portfolio_count": 0, "stock_count": 0}, "portfolios": [], "stocks": []}
+        return {
+            "account_profile": account_profile,
+            "summary": {"portfolio_count": 0, "stock_count": 0},
+            "portfolios": [],
+            "stocks": [],
+        }
 
     portfolio_map = {p["id"]: p for p in portfolios}
     portfolio_ids = list(portfolio_map.keys())
@@ -307,6 +318,7 @@ def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
         )
 
     return {
+        "account_profile": account_profile,
         "summary": {
             "portfolio_count": len(portfolios),
             "stock_count": len(stock_rows),
