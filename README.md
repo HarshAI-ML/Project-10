@@ -1,4 +1,4 @@
-# Auto Invest AI
+ï»¿# Auto Invest AI
 
 Auto Invest AI is a full-stack stock portfolio analytics platform with:
 - user portfolios and default sector portfolios
@@ -13,7 +13,7 @@ Auto Invest AI is a full-stack stock portfolio analytics platform with:
 |---|---|
 | Backend | Django, Django REST Framework |
 | Frontend | React (Vite), Tailwind CSS, Recharts |
-| Database | SQLite (local dev), PostgreSQL-ready |
+| Database | PostgreSQL-ready (configured via Django settings) |
 | Data Sources | yfinance, Economic Times RSS |
 | ML | pandas, scikit-learn (Linear Regression) |
 
@@ -22,14 +22,14 @@ Auto Invest AI is a full-stack stock portfolio analytics platform with:
 ```text
 Project-10/
 +-- backend/
-¦   +-- api/
-¦   +-- analytics/
-¦   +-- pipeline/
-¦   +-- portfolio/
-¦   +-- manage.py
+Â¦   +-- api/
+Â¦   +-- analytics/
+Â¦   +-- pipeline/
+Â¦   +-- portfolio/
+Â¦   +-- manage.py
 +-- frontend/
-¦   +-- src/
-¦   +-- package.json
+Â¦   +-- src/
+Â¦   +-- package.json
 +-- docs/
 ```
 
@@ -102,3 +102,4 @@ See: [backend/README_PIPELINE.md](backend/README_PIPELINE.md)
 ## Sequence Diagrams
 
 See: [docs/SEQUENCE_DIAGRAM.md](docs/SEQUENCE_DIAGRAM.md)
+

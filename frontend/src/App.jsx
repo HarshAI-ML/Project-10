@@ -1,21 +1,24 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import Loader from "./components/Loader";
 import ChatWidget from "./components/ChatWidget";
 import ProtectedRoute from "./routes/ProtectedRoute";
-import Home from "./pages/Home";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import TelegramRegister from "./pages/TelegramRegister";
-import TelegramForgotPassword from "./pages/TelegramForgotPassword";
-import Portfolio from "./pages/Portfolio";
-import PortfolioClusters from "./pages/PortfolioClusters";
-import Stocks from "./pages/Stocks";
-import StockDetail from "./pages/StockDetail";
-import LiveStockDetail from "./pages/LiveStockDetail";
-import CompareStocks from "./pages/CompareStocks";
-import PricePrediction from "./pages/PricePrediction";
-import AutoSignal from "./pages/AutoSignal";
-import AutoSignalCompany from "./pages/AutoSignalCompany";
+
+const Home = lazy(() => import("./pages/Home"));
+const Login = lazy(() => import("./pages/Login"));
+const Register = lazy(() => import("./pages/Register"));
+const TelegramRegister = lazy(() => import("./pages/TelegramRegister"));
+const TelegramForgotPassword = lazy(() => import("./pages/TelegramForgotPassword"));
+const Portfolio = lazy(() => import("./pages/Portfolio"));
+const PortfolioClusters = lazy(() => import("./pages/PortfolioClusters"));
+const Stocks = lazy(() => import("./pages/Stocks"));
+const StockDetail = lazy(() => import("./pages/StockDetail"));
+const LiveStockDetail = lazy(() => import("./pages/LiveStockDetail"));
+const CompareStocks = lazy(() => import("./pages/CompareStocks"));
+const PricePrediction = lazy(() => import("./pages/PricePrediction"));
+const AutoSignal = lazy(() => import("./pages/AutoSignal"));
+const AutoSignalCompany = lazy(() => import("./pages/AutoSignalCompany"));
 
 export default function App() {
   const location = useLocation();
@@ -46,96 +49,104 @@ export default function App() {
         }
       >
         {!isHome && <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-br from-white/35 via-transparent to-indigo-100/30" />}
-        <div key={location.pathname} className="page-enter relative">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Navigate to="/telegram-register" replace />} />
-            <Route path="/telegram-register" element={<TelegramRegister />} />
-            <Route path="/telegram-forgot-password" element={<TelegramForgotPassword />} />
-            <Route
-              path="/portfolio"
-              element={
-                <ProtectedRoute>
-                  <Portfolio />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/portfolio/:id/clusters"
-              element={
-                <ProtectedRoute>
-                  <PortfolioClusters />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/clusters"
-              element={
-                <ProtectedRoute>
-                  <PortfolioClusters />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/stocks"
-              element={
-                <ProtectedRoute>
-                  <Stocks />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/compare"
-              element={
-                <ProtectedRoute>
-                  <CompareStocks />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/prediction"
-              element={
-                <ProtectedRoute>
-                  <PricePrediction />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/stocks/:id"
-              element={
-                <ProtectedRoute>
-                  <StockDetail />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/stocks/live/:symbol"
-              element={
-                <ProtectedRoute>
-                  <LiveStockDetail />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/autosignal"
-              element={
-                <ProtectedRoute>
-                  <AutoSignal />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/autosignal/:slug"
-              element={
-                <ProtectedRoute>
-                  <AutoSignalCompany />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </div>
+        <Suspense
+          fallback={
+            <div className="flex min-h-[60vh] items-center justify-center">
+              <Loader />
+            </div>
+          }
+        >
+          <div key={location.pathname} className="page-enter relative">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Navigate to="/telegram-register" replace />} />
+              <Route path="/telegram-register" element={<TelegramRegister />} />
+              <Route path="/telegram-forgot-password" element={<TelegramForgotPassword />} />
+              <Route
+                path="/portfolio"
+                element={
+                  <ProtectedRoute>
+                    <Portfolio />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/portfolio/:id/clusters"
+                element={
+                  <ProtectedRoute>
+                    <PortfolioClusters />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/clusters"
+                element={
+                  <ProtectedRoute>
+                    <PortfolioClusters />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/stocks"
+                element={
+                  <ProtectedRoute>
+                    <Stocks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/compare"
+                element={
+                  <ProtectedRoute>
+                    <CompareStocks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/prediction"
+                element={
+                  <ProtectedRoute>
+                    <PricePrediction />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/stocks/:id"
+                element={
+                  <ProtectedRoute>
+                    <StockDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/stocks/live/:symbol"
+                element={
+                  <ProtectedRoute>
+                    <LiveStockDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/autosignal"
+                element={
+                  <ProtectedRoute>
+                    <AutoSignal />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/autosignal/:slug"
+                element={
+                  <ProtectedRoute>
+                    <AutoSignalCompany />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </Suspense>
       </main>
       <ChatWidget />
     </div>

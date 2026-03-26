@@ -55,7 +55,7 @@ cd auto_invest_AI
 
 ---
 
-## 4. Upload ML Models & Database (from your local machine)
+## 4. Upload ML Models (from your local machine)
 
 > ⚠️ These are gitignored — must be uploaded manually once.
 
@@ -67,9 +67,6 @@ $PRJ = "~/auto_invest_AI"
 
 # Upload trained model files
 scp -i $PEM -r backend/predictions/ "${VM}:${PRJ}/backend/"
-
-# Upload database
-scp -i $PEM backend/db.sqlite3 "${VM}:${PRJ}/backend/"
 ```
 
 ---

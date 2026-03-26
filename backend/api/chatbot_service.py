@@ -1,10 +1,10 @@
 import os
-from functools import lru_cache
+import threading
+import logging
 from typing import Any, Dict, List, Optional, TypedDict
 import json
 
 import requests
-from django.contrib.auth.models import AnonymousUser
 from django.db import connection
 
 from analytics.data_access import (
@@ -16,11 +16,14 @@ from analytics.data_access import (
 )
 from portfolio.models import Portfolio, PortfolioStock
 
+logger = logging.getLogger(__name__)
+
 try:
     from langgraph.graph import END, StateGraph
 
     LANGGRAPH_AVAILABLE = True
-except Exception:
+except Exception as exc:
+    logger.debug("LangGraph unavailable; using fallback chat flow: %s", exc)
     LANGGRAPH_AVAILABLE = False
 
 
@@ -53,11 +56,23 @@ class ChatState(TypedDict, total=False):
     history: List[Dict[str, str]]
     is_authenticated: bool
     user: Any
+    portfolio_id: Optional[int]
     route: str
     user_context: str
     vector_context: str
     user_context_payload: Dict[str, Any]
     response: str
+
+
+_GRAPH_APP = None
+_GRAPH_APP_LOCK = threading.Lock()
+_EMBED_MODEL = None
+_EMBED_LOCK = threading.Lock()
+
+
+class ChatProviderError(RuntimeError):
+    """Raised when a chat provider cannot produce a usable response."""
+
 
 
 def _normalize_history(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -83,17 +98,24 @@ def _normalize_history(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     return cleaned
 
 
-@lru_cache(maxsize=1)
 def _get_embedding_model():
-    try:
-        from sentence_transformers import SentenceTransformer
-    except Exception:
-        return None
+    global _EMBED_MODEL
 
-    try:
-        return SentenceTransformer(EMBEDDING_MODEL_NAME)
-    except Exception:
-        return None
+    if _EMBED_MODEL is not None:
+        return _EMBED_MODEL
+
+    with _EMBED_LOCK:
+        if _EMBED_MODEL is not None:
+            return _EMBED_MODEL
+
+        try:
+            from sentence_transformers import SentenceTransformer
+            _EMBED_MODEL = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        except Exception as exc:
+            logger.debug("Embedding model unavailable: %s", exc)
+            _EMBED_MODEL = None
+
+    return _EMBED_MODEL
 
 
 def _to_vector_literal(values: List[float]) -> str:
@@ -114,6 +136,7 @@ def _safe_json_dict(value: Any) -> Dict[str, Any]:
         try:
             parsed = json.loads(value)
         except Exception:
+            logger.debug("Failed to parse JSON metadata in vector search.", exc_info=True)
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
@@ -153,6 +176,7 @@ def _vector_search_documents(
         try:
             embedding = emb_model.encode([query], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
         except Exception:
+            logger.exception("Embedding generation failed for chatbot query")
             embedding = None
 
     snippet_limit = VECTOR_SNIPPET_CHARS
@@ -269,7 +293,7 @@ def _call_groq_chat(system_prompt: str, history: List[Dict[str, str]], user_mess
     """
     api_key = os.getenv("GROQ_API_KEY", "").strip()
     if not api_key:
-        return "Chatbot is not configured yet. Please set GROQ_API_KEY in backend .env."
+        raise ChatProviderError("GROQ_API_KEY is not configured.")
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
@@ -296,9 +320,9 @@ def _call_groq_chat(system_prompt: str, history: List[Dict[str, str]], user_mess
         return str(content).strip()
     except requests.exceptions.HTTPError as exc:
         status = getattr(exc.response, "status_code", "unknown")
-        return f"I could not generate a response right now (model API error: {status}). Please try again."
-    except Exception:
-        return "I could not generate a response right now. Please try again in a moment."
+        raise ChatProviderError(f"Groq request failed (HTTP {status}).") from exc
+    except Exception as exc:
+        raise ChatProviderError("Groq request failed.") from exc
 
 
 def _call_openrouter_chat(system_prompt: str, history: List[Dict[str, str]], user_message: str) -> str:
@@ -319,7 +343,7 @@ def _call_openrouter_chat(system_prompt: str, history: List[Dict[str, str]], use
     """
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        return "OPENROUTER_API_KEY is not configured."
+        raise ChatProviderError("OPENROUTER_API_KEY is not configured.")
 
     model = os.getenv("OPENROUTER_MODEL", "openai/gpt-3.5-turbo").strip()
     app_name = os.getenv("OPENROUTER_APP_NAME", "auto-invest-chatbot").strip()
@@ -351,9 +375,9 @@ def _call_openrouter_chat(system_prompt: str, history: List[Dict[str, str]], use
         return str(content).strip()
     except requests.exceptions.HTTPError as exc:
         status = getattr(exc.response, "status_code", "unknown")
-        return f"OpenRouter request failed (HTTP {status})."
-    except Exception:
-        return "OpenRouter request failed."
+        raise ChatProviderError(f"OpenRouter request failed (HTTP {status}).") from exc
+    except Exception as exc:
+        raise ChatProviderError("OpenRouter request failed.") from exc
 
 
 def _call_chat_model(system_prompt: str, history: List[Dict[str, str]], user_message: str) -> str:
@@ -376,20 +400,31 @@ def _call_chat_model(system_prompt: str, history: List[Dict[str, str]], user_mes
     provider = os.getenv("CHAT_PROVIDER", "auto").strip().lower()
 
     if provider == "openrouter":
-        return _call_openrouter_chat(system_prompt, history, user_message)
+        try:
+            return _call_openrouter_chat(system_prompt, history, user_message)
+        except ChatProviderError as exc:
+            logger.exception("OpenRouter chat provider failed.")
+            return str(exc)
     if provider == "groq":
-        return _call_groq_chat(system_prompt, history, user_message)
+        try:
+            return _call_groq_chat(system_prompt, history, user_message)
+        except ChatProviderError as exc:
+            logger.exception("Groq chat provider failed.")
+            return str(exc)
 
     # auto fallback mode
-    groq_reply = _call_groq_chat(system_prompt, history, user_message)
-    if "could not generate" in groq_reply.lower() or "model api error" in groq_reply.lower() or "not configured" in groq_reply.lower():
-        openrouter_reply = _call_openrouter_chat(system_prompt, history, user_message)
-        if "failed" not in openrouter_reply.lower() and "not configured" not in openrouter_reply.lower():
-            return openrouter_reply
-    return groq_reply
+    try:
+        return _call_groq_chat(system_prompt, history, user_message)
+    except ChatProviderError as groq_exc:
+        logger.warning("Groq failed, attempting OpenRouter fallback: %s", groq_exc)
+        try:
+            return _call_openrouter_chat(system_prompt, history, user_message)
+        except ChatProviderError as openrouter_exc:
+            logger.exception("OpenRouter fallback also failed.")
+            return str(openrouter_exc)
 
 
-def _build_user_context(user: Any) -> str:
+def _build_user_context(user: Any, portfolio_id: Optional[int] = None) -> str:
     """
     Build a text summary of the user's portfolio for use in LLM prompts.
 
@@ -403,9 +438,18 @@ def _build_user_context(user: Any) -> str:
     Returns:
         Formatted string containing portfolio summary, or message if user has no portfolios
     """
+    portfolios_qs = Portfolio.objects.filter(user=user)
+    if portfolio_id is not None:
+        portfolios_qs = portfolios_qs.filter(id=portfolio_id)
     portfolios = list(
-        Portfolio.objects.filter(user=user).values("id", "name", "geography", "is_default").order_by("-is_default", "name")
+        portfolios_qs.values("id", "name", "geography", "is_default").order_by("-is_default", "name")
     )
+    if not portfolios and portfolio_id is not None:
+        portfolios = list(
+            Portfolio.objects.filter(user=user)
+            .values("id", "name", "geography", "is_default")
+            .order_by("-is_default", "name")
+        )
     if not portfolios:
         return "User has no portfolios yet."
 
@@ -493,7 +537,7 @@ def _keyword_score(query: str, stock_row: Dict[str, Any]) -> int:
     return score
 
 
-def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
+def _build_user_context_payload(user: Any, query: str, portfolio_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Build a structured payload containing the user's portfolio data for LLM context.
 
@@ -516,11 +560,19 @@ def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
         "is_authenticated": bool(getattr(user, "is_authenticated", False)),
     }
 
+    portfolios_qs = Portfolio.objects.filter(user=user)
+    if portfolio_id is not None:
+        portfolios_qs = portfolios_qs.filter(id=portfolio_id)
     portfolios = list(
-        Portfolio.objects.filter(user=user)
-        .values("id", "name", "geography", "is_default")
+        portfolios_qs.values("id", "name", "geography", "is_default")
         .order_by("-is_default", "name")
     )
+    if not portfolios and portfolio_id is not None:
+        portfolios = list(
+            Portfolio.objects.filter(user=user)
+            .values("id", "name", "geography", "is_default")
+            .order_by("-is_default", "name")
+        )
     if not portfolios:
         return {
             "account_profile": account_profile,
@@ -552,6 +604,11 @@ def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
             latest = get_latest_price(t) or {}
             latest_prices[t] = _to_float(latest.get("close"))
         except Exception:
+            logger.exception(
+                "Failed to load latest price for chatbot context (user=%s, ticker=%s)",
+                getattr(user, "pk", "?"),
+                t,
+            )
             latest_prices[t] = None
 
     stock_rows: List[Dict[str, Any]] = []
@@ -564,6 +621,7 @@ def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
         fd = fundamentals.get(ticker, {})
         stock_rows.append(
             {
+                "portfolio_id": row["portfolio_id"],
                 "portfolio_name": portfolio.get("name"),
                 "portfolio_geography": portfolio.get("geography"),
                 "ticker": ticker,
@@ -629,10 +687,50 @@ def _build_user_context_payload(user: Any, query: str) -> Dict[str, Any]:
         },
         "portfolios": by_portfolio,
         "stocks": selected,
+        "active_portfolio_id": portfolio_id,
     }
 
 
-def _build_user_context_prompt(user: Any, query: str) -> str:
+def _wrap_user_context_for_prompt(user_context: str) -> str:
+    context = str(user_context or "").strip()
+    if not context:
+        return ""
+    return f"USER_CONTEXT_JSON:\n<user_context>\n{context}\n</user_context>"
+
+
+def _get_graph_app():
+    """
+    Compile the LangGraph application once and reuse it across requests.
+    """
+    global _GRAPH_APP
+
+    if not LANGGRAPH_AVAILABLE:
+        return None
+
+    if _GRAPH_APP is not None:
+        return _GRAPH_APP
+
+    with _GRAPH_APP_LOCK:
+        if _GRAPH_APP is not None:
+            return _GRAPH_APP
+
+        graph = StateGraph(ChatState)
+        graph.add_node("route", _route_node)
+        graph.add_node("respond_guest", _respond_guest_node)
+        graph.add_node("respond_auth", _respond_auth_node)
+        graph.set_entry_point("route")
+        graph.add_conditional_edges(
+            "route",
+            lambda st: st.get("route", "guest"),
+            {"guest": "respond_guest", "auth": "respond_auth"},
+        )
+        graph.add_edge("respond_guest", END)
+        graph.add_edge("respond_auth", END)
+        _GRAPH_APP = graph.compile()
+        return _GRAPH_APP
+
+
+def _build_user_context_prompt(user: Any, query: str, portfolio_id: Optional[int] = None) -> str:
     """
     Convert user context payload to a JSON string for inclusion in LLM prompts.
 
@@ -643,8 +741,8 @@ def _build_user_context_prompt(user: Any, query: str) -> str:
     Returns:
         JSON string representation of the user's portfolio context
     """
-    payload = _build_user_context_payload(user, query)
-    return json.dumps(payload, ensure_ascii=True)
+    payload = _build_user_context_payload(user, query, portfolio_id=portfolio_id)
+    return _wrap_user_context_for_prompt(json.dumps(payload, ensure_ascii=True))
 
 
 def _resolve_metric_from_query(query: str) -> Optional[str]:
@@ -696,7 +794,12 @@ def _resolve_direction_from_query(query: str) -> Optional[str]:
     return None
 
 
-def _answer_quant_query(user: Any, query: str, payload: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def _answer_quant_query(
+    user: Any,
+    query: str,
+    payload: Optional[Dict[str, Any]] = None,
+    portfolio_id: Optional[int] = None,
+) -> Optional[str]:
     """
     Attempt to answer a quantitative question directly from portfolio data.
 
@@ -718,10 +821,15 @@ def _answer_quant_query(user: Any, query: str, payload: Optional[Dict[str, Any]]
     if not metric or not direction:
         return None
 
-    payload = payload or _build_user_context_payload(user, query)
+    payload = payload or _build_user_context_payload(user, query, portfolio_id=portfolio_id)
     rows = payload.get("stocks", [])
     if not rows:
         return "I could not find stock data in your portfolios yet."
+
+    if portfolio_id is not None:
+        rows = [r for r in rows if r.get("portfolio_id") == portfolio_id]
+        if not rows:
+            return "I could not find stock data in the selected portfolio yet."
 
     q = (query or "").lower()
 
@@ -795,36 +903,6 @@ def _route_node(state: ChatState) -> ChatState:
     return {"route": route}
 
 
-def _load_user_context_node(state: ChatState) -> ChatState:
-    """
-    Load the user's portfolio context for inclusion in the LLM prompt.
-
-    For authenticated users, builds a JSON payload containing portfolio
-    and stock data. For guests or anonymous users, returns empty context.
-
-    Args:
-        state: Current chat state containing user and message
-
-    Returns:
-        Dictionary with 'user_context' key containing JSON string or
-        empty string/unavailable message
-    """
-    user = state.get("user")
-    if not user or isinstance(user, AnonymousUser):
-        return {"user_context": "", "vector_context": ""}
-    if state.get("user_context") and state.get("vector_context") is not None:
-        return {}
-    try:
-        payload = state.get("user_context_payload") or _build_user_context_payload(user, state.get("message", ""))
-        return {
-            "user_context": json.dumps(payload, ensure_ascii=True),
-            "vector_context": _build_vector_context(state.get("message", ""), payload),
-            "user_context_payload": payload,
-        }
-    except Exception:
-        return {"user_context": "User context is temporarily unavailable.", "vector_context": ""}
-
-
 def _respond_guest_node(state: ChatState) -> ChatState:
     """
     Generate a response for guest/unauthenticated users.
@@ -868,17 +946,22 @@ def _respond_auth_node(state: ChatState) -> ChatState:
     """
     user_context = state.get("user_context", "")
     vector_context = state.get("vector_context", "")
+    wrapped_user_context = _wrap_user_context_for_prompt(user_context)
     system_prompt = (
         "You are AUTO INVEST personalized assistant for logged-in users. "
         "The USER_CONTEXT is authoritative account data. "
+        "If USER_CONTEXT_JSON includes active_portfolio_id, treat the enclosed stocks as the current open portfolio scope. "
+        "For questions about holdings, rankings, risk, upside, sentiment, or valuation within the portfolio, answer only from that scoped portfolio context. "
+        "For general investing or market questions that do not ask about portfolio holdings, answer normally and do not force portfolio-specific data. "
         "Answer using USER_CONTEXT first. "
         "Never say you don't have data if USER_CONTEXT includes relevant fields. "
         "If a metric is missing in USER_CONTEXT, say that clearly and suggest next available metric. "
         "Do not invent holdings, prices, or ratios. "
         "When user asks for best/highest/lowest/top, compute from USER_CONTEXT and show ticker + value + portfolio. "
-        "Keep responses concise and practical. Not financial advice.\n\n"
-        f"USER_CONTEXT_JSON:\n{user_context}"
+        "Keep responses concise and practical. Not financial advice."
     )
+    if wrapped_user_context:
+        system_prompt = f"{system_prompt}\n\n{wrapped_user_context}"
     if vector_context:
         system_prompt = f"{system_prompt}\n\n{vector_context}"
     text = _call_chat_model(system_prompt, state.get("history", []), state.get("message", ""))
@@ -901,13 +984,16 @@ def _run_fallback(state: ChatState) -> str:
     if state.get("is_authenticated"):
         ctx = state.get("user_context", "")
         vector_ctx = state.get("vector_context", "")
+        wrapped_ctx = _wrap_user_context_for_prompt(ctx)
         prompt = (
             "You are AUTO INVEST personalized assistant. "
+            "If the context includes an active portfolio scope, use it for questions about holdings and portfolio comparisons. "
+            "For general market or educational questions, answer normally without inventing portfolio data. "
             "Use this context as authoritative account data. "
-            "Compute rankings from it when asked.\n"
+            "Compute rankings from it when asked."
         )
-        if ctx:
-            prompt = f"{prompt}{ctx}"
+        if wrapped_ctx:
+            prompt = f"{prompt}\n\n{wrapped_ctx}"
         if vector_ctx:
             prompt = f"{prompt}\n\n{vector_ctx}"
     else:
@@ -918,7 +1004,13 @@ def _run_fallback(state: ChatState) -> str:
     return _call_chat_model(prompt, state.get("history", []), state.get("message", ""))
 
 
-def generate_chat_response(*, user: Any, message: str, history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def generate_chat_response(
+    *,
+    user: Any,
+    message: str,
+    history: Optional[List[Dict[str, Any]]] = None,
+    portfolio_id: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Generate a chatbot response for a user, either generic or personalized.
 
@@ -946,14 +1038,26 @@ def generate_chat_response(*, user: Any, message: str, history: Optional[List[Di
     is_authenticated = bool(getattr(user, "is_authenticated", False))
     if is_authenticated:
         try:
-            user_context_payload = _build_user_context_payload(user, message.strip())
+            user_context_payload = _build_user_context_payload(
+                user,
+                message.strip(),
+                portfolio_id=portfolio_id,
+            )
             user_context = json.dumps(user_context_payload, ensure_ascii=True)
         except Exception:
+            logger.exception(
+                "Context build failed for user=%s",
+                getattr(user, "pk", "?"),
+            )
             user_context_payload = None
             user_context = ""
     try:
         vector_context = _build_vector_context(message.strip(), user_context_payload)
     except Exception:
+        logger.exception(
+            "Vector context build failed for user=%s",
+            getattr(user, "pk", "?"),
+        )
         vector_context = ""
 
     base_state: ChatState = {
@@ -961,6 +1065,7 @@ def generate_chat_response(*, user: Any, message: str, history: Optional[List[Di
         "history": normalized_history,
         "is_authenticated": is_authenticated,
         "user": user,
+        "portfolio_id": portfolio_id,
         "user_context_payload": user_context_payload or {},
         "user_context": user_context,
         "vector_context": vector_context,
@@ -968,7 +1073,12 @@ def generate_chat_response(*, user: Any, message: str, history: Optional[List[Di
 
     # General quantitative query handler (metric + ranking + optional filters)
     if base_state["is_authenticated"]:
-        quantified = _answer_quant_query(user, base_state["message"], payload=user_context_payload)
+        quantified = _answer_quant_query(
+            user,
+            base_state["message"],
+            payload=user_context_payload,
+            portfolio_id=portfolio_id,
+        )
         if quantified:
             return {
                 "reply": quantified,
@@ -985,22 +1095,16 @@ def generate_chat_response(*, user: Any, message: str, history: Optional[List[Di
             "suggestions": _suggested_questions(is_authenticated),
         }
 
-    graph = StateGraph(ChatState)
-    graph.add_node("route", _route_node)
-    graph.add_node("load_user_context", _load_user_context_node)
-    graph.add_node("respond_guest", _respond_guest_node)
-    graph.add_node("respond_auth", _respond_auth_node)
-    graph.set_entry_point("route")
-    graph.add_conditional_edges(
-        "route",
-        lambda st: st.get("route", "guest"),
-        {"guest": "respond_guest", "auth": "load_user_context"},
-    )
-    graph.add_edge("load_user_context", "respond_auth")
-    graph.add_edge("respond_guest", END)
-    graph.add_edge("respond_auth", END)
+    app = _get_graph_app()
+    if app is None:
+        answer = _run_fallback(base_state)
+        is_authenticated = base_state["is_authenticated"]
+        return {
+            "reply": answer,
+            "mode": "personalized" if is_authenticated else "generic",
+            "suggestions": _suggested_questions(is_authenticated),
+        }
 
-    app = graph.compile()
     result = app.invoke(base_state)
     reply = str(result.get("response") or "").strip()
     if not reply:

@@ -197,7 +197,7 @@ export default function StockDetail() {
       </div>
     );
 
-  const backQuery = stock.portfolio ? `?portfolio=${stock.portfolio}` : "";
+  const backPath = location.state?.from || (stock.portfolio ? `/stocks?portfolio=${stock.portfolio}` : "/stocks");
   const currency = currencyCodeFromItem(stock);
   const hasPrediction =
     stock.prediction_status === "ok" ||
@@ -229,7 +229,7 @@ export default function StockDetail() {
       <div className="flex items-center justify-between">
         <div>
           <Link
-            to={`/stocks${backQuery}`}
+            to={backPath}
             className="mb-2 inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-indigo-600 transition-colors"
           >
             &larr; Back to Stocks
@@ -487,7 +487,7 @@ export default function StockDetail() {
       {/* Quick actions */}
       <div className="flex flex-wrap gap-4">
         <Link
-          to={`/stocks${backQuery}`}
+          to={backPath}
           className="group relative inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-md transition hover:shadow-lg hover:border-slate-400 hover:bg-slate-50"
         >
           <span className="transition group-hover:-translate-x-0.5">&larr;</span>

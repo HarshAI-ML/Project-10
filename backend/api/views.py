@@ -1,10 +1,13 @@
 from datetime import date, timedelta
+import json
 import threading
 import logging
 import os
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.db.models import Count, Max, Min, Q
+from django.db import transaction
+from django.http import StreamingHttpResponse
 from rest_framework import mixins, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
@@ -1236,16 +1239,45 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
 class ChatbotAPIView(APIView):
     permission_classes = [AllowAny]
 
+    @staticmethod
+    def _chunk_text(text, chunk_size=96):
+        content = str(text or "")
+        if not content:
+            return [""]
+        return [content[i : i + chunk_size] for i in range(0, len(content), chunk_size)]
+
+    def _stream_payload(self, payload):
+        def iterator():
+            meta = {
+                "mode": payload.get("mode"),
+                "suggestions": payload.get("suggestions", []),
+            }
+            yield json.dumps({"type": "meta", "payload": meta}, ensure_ascii=False) + "\n"
+            for chunk in self._chunk_text(payload.get("reply", "")):
+                yield json.dumps({"type": "delta", "delta": chunk}, ensure_ascii=False) + "\n"
+            yield json.dumps({"type": "done", "payload": meta}, ensure_ascii=False) + "\n"
+
+        response = StreamingHttpResponse(iterator(), content_type="application/x-ndjson; charset=utf-8")
+        response["Cache-Control"] = "no-cache, no-transform"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
     def post(self, request):
         serializer = ChatMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         message = serializer.validated_data["message"]
         history = serializer.validated_data.get("history", [])
+        portfolio_id = serializer.validated_data.get("portfolio_id")
 
         payload = generate_chat_response(
             user=request.user,
             message=message,
             history=history,
+            portfolio_id=portfolio_id,
         )
+        if serializer.validated_data.get("stream"):
+            return self._stream_payload(payload)
         return Response(payload, status=status.HTTP_200_OK)
+
+

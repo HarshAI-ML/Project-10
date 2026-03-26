@@ -6,7 +6,7 @@ This document describes the backend database structure across apps, including me
 
 - Project path: `backend/`
 - Framework: Django ORM
-- Main DB: SQLite in local dev (`backend/db.sqlite3`)
+- Main DB: configured through Django `DATABASES` settings and environment variables
 - Includes Django built-in auth/session/token tables plus project tables below.
 
 ## High-Level Architecture

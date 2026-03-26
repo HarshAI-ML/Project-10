@@ -253,19 +253,44 @@ export default function Stocks() {
       setLoading(true);
       setError("");
       try {
-        const [portfolioData, stockData] = await Promise.all([
-          fetchPortfolio({ lite: true }),
+        const [portfolioResult, stockResult] = await Promise.allSettled([
+          fetchPortfolio(),
           fetchStocks(portfolioId, stockFetchOptions),
         ]);
-        const pArr = Array.isArray(portfolioData) ? portfolioData : [];
-        const sArr = Array.isArray(stockData) ? stockData : [];
-        if (!pArr.some((p) => String(p.id) === String(portfolioId))) {
+
+        const pArr =
+          portfolioResult.status === "fulfilled" && Array.isArray(portfolioResult.value)
+            ? portfolioResult.value
+            : [];
+        const sArr =
+          stockResult.status === "fulfilled" && Array.isArray(stockResult.value)
+            ? stockResult.value
+            : [];
+
+        if (pArr.length > 0 && !pArr.some((p) => String(p.id) === String(portfolioId))) {
           navigate("/portfolio?notice=select-portfolio", { replace: true });
           return;
         }
+
         sessionStorage.setItem(ACTIVE_PORTFOLIO_KEY, String(portfolioId));
         setPortfolios(pArr);
-        setStocks(sArr);
+        if (stockResult.status === "rejected") {
+          try {
+            const fallbackStocks = await fetchStocks(portfolioId);
+            setStocks(Array.isArray(fallbackStocks) ? fallbackStocks : []);
+            setError("");
+          } catch {
+            setStocks(sArr);
+            setError("Unable to load stocks.");
+          }
+        } else {
+          setStocks(sArr);
+        }
+        if (portfolioResult.status === "rejected" && stockResult.status === "fulfilled") {
+          setError("");
+        } else if (stockResult.status === "rejected" && sArr.length > 0) {
+          setError("");
+        }
       } catch {
         setError("Unable to load stocks.");
       } finally {

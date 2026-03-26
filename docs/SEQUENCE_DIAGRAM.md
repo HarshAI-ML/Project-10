@@ -8,7 +8,7 @@ sequenceDiagram
     actor U as User
     participant F as Frontend (Login/Register)
     participant API as Django API
-    participant DB as SQLite
+    participant DB as Database
 
     U->>F: Submit register/login form
     F->>API: POST /api/register/ or /api/login/
@@ -28,7 +28,7 @@ sequenceDiagram
     participant F as Frontend (Stocks Page)
     participant API as Django API
     participant YF as Yahoo Finance (yfinance)
-    participant DB as SQLite
+    participant DB as Database
     participant AN as Analytics Pipeline
     participant PR as Prediction Service
 
@@ -57,7 +57,7 @@ sequenceDiagram
     actor U as User
     participant F as Frontend (Stocks Page)
     participant API as Django API
-    participant DB as SQLite
+    participant DB as Database
 
     U->>F: Navigate to /stocks?portfolio={id}
     F->>API: GET /api/portfolio/
@@ -106,7 +106,7 @@ sequenceDiagram
     participant CS as Cluster Service
     participant Cache as Django Cache
     participant YF as Yahoo Finance (yfinance)
-    participant DB as SQLite
+    participant DB as Database
 
     U->>F: Navigate to /portfolio/:id/clusters
     F->>API: GET /api/portfolio/{id}/clusters/?n_clusters=3

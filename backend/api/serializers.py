@@ -5,7 +5,9 @@ from rest_framework import serializers
 
 from analytics.data_access import (
     get_fundamentals_bulk,
+    get_latest_forecast,
     get_latest_insights_bulk,
+    get_latest_signals_bulk,
     get_stocks_sentiment_bulk,
 )
 from portfolio.models import Portfolio, Stock, PortfolioStock
@@ -217,12 +219,12 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
     max_price = serializers.SerializerMethodField()
     today_price = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
-    predicted_price_1d = serializers.FloatField(read_only=True)
-    expected_change_pct = serializers.FloatField(read_only=True)
-    direction_signal = serializers.CharField(read_only=True)
-    model_confidence_r2 = serializers.FloatField(read_only=True)
-    prediction_status = serializers.CharField(read_only=True)
-    recommended_action = serializers.CharField(read_only=True)
+    predicted_price_1d = serializers.SerializerMethodField()
+    expected_change_pct = serializers.SerializerMethodField()
+    direction_signal = serializers.SerializerMethodField()
+    model_confidence_r2 = serializers.SerializerMethodField()
+    prediction_status = serializers.SerializerMethodField()
+    recommended_action = serializers.SerializerMethodField()
     sentiment_score = serializers.SerializerMethodField()
     sentiment_label = serializers.SerializerMethodField()
     sentiment_source = serializers.SerializerMethodField()
@@ -257,6 +259,56 @@ class StockDetailSerializer(GoldInsightMixin, serializers.ModelSerializer):
         insight = self._insight(obj)
         prices = (insight.get("graph_data") or {}).get("price", [])
         return [float(value) for value in prices if isinstance(value, (int, float))]
+
+    def _latest_forecast(self, obj):
+        if hasattr(self, "_cached_latest_forecast"):
+            return self._cached_latest_forecast
+
+        self._cached_latest_forecast = get_latest_forecast(obj.symbol)
+        return self._cached_latest_forecast
+
+    def _latest_signal(self, obj):
+        if hasattr(self, "_cached_latest_signal"):
+            return self._cached_latest_signal
+
+        self._cached_latest_signal = get_latest_signals_bulk([obj.symbol]).get(obj.symbol, {})
+        return self._cached_latest_signal
+
+    def get_predicted_price_1d(self, obj):
+        forecast = self._latest_forecast(obj)
+        if forecast.get("predicted_price") is not None:
+            return forecast.get("predicted_price")
+        return obj.predicted_price_1d
+
+    def get_expected_change_pct(self, obj):
+        forecast = self._latest_forecast(obj)
+        if forecast.get("expected_change_pct") is not None:
+            return forecast.get("expected_change_pct")
+        return obj.expected_change_pct
+
+    def get_direction_signal(self, obj):
+        forecast = self._latest_forecast(obj)
+        if forecast.get("direction"):
+            return forecast.get("direction")
+        return obj.direction_signal
+
+    def get_model_confidence_r2(self, obj):
+        forecast = self._latest_forecast(obj)
+        if forecast.get("confidence_r2") is not None:
+            return forecast.get("confidence_r2")
+        return obj.model_confidence_r2
+
+    def get_prediction_status(self, obj):
+        forecast = self._latest_forecast(obj)
+        if forecast:
+            return "ready"
+        return obj.prediction_status
+
+    def get_recommended_action(self, obj):
+        signal = self._latest_signal(obj).get("signal")
+        if signal:
+            return signal
+        return obj.recommended_action
 
     def get_analytics(self, obj):
         from pipeline.models import SilverSentimentScore
@@ -412,6 +464,8 @@ class ResetPasswordSerializer(serializers.Serializer):
 class ChatMessageSerializer(serializers.Serializer):
     message = serializers.CharField(max_length=2000)
     session_id = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    portfolio_id = serializers.IntegerField(required=False, allow_null=True)
+    stream = serializers.BooleanField(required=False, default=False)
     history = serializers.ListField(
         child=serializers.DictField(),
         required=False,

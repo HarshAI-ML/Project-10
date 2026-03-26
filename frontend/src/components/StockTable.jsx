@@ -1,8 +1,7 @@
-﻿import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { currencyCodeFromItem, formatMoney } from "../utils/currency";
 
-const statusLabel = (stock) =>
-  stock.prediction_status === "insufficient_data" ? "Low Data" : "—";
+const statusLabel = (stock) => (stock.prediction_status === "insufficient_data" ? "Low Data" : "—");
 
 const normalizeAction = (value) => {
   const text = String(value || "").trim().toUpperCase();
@@ -23,42 +22,53 @@ const ActionBadge = ({ action }) => {
       : normalized === "SELL"
       ? "bg-rose-100 text-rose-600"
       : "bg-amber-100 text-amber-700";
-  return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ${style}`}>
-      {normalized}
-    </span>
-  );
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ${style}`}>{normalized}</span>;
 };
 
 const SortableHeader = ({ col, label, sortCol, sortDir, onSort, align = "left" }) => {
   const isActive = sortCol === col;
-  const icon = !isActive ? ' ⇅' : (sortDir === 'asc' ? ' ↑' : ' ↓');
-  const alignClass =
-    align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+  const icon = !isActive ? " ⇅" : sortDir === "asc" ? " ↑" : " ↓";
+  const alignClass = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
 
   return (
     <th
       className={`cursor-pointer select-none px-2.5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 whitespace-nowrap hover:text-cyan-200 transition-colors ${alignClass}`}
       onClick={() => {
-        if (onSort) {
-          if (sortCol === col) {
-            onSort(col, sortDir === 'asc' ? 'desc' : 'asc');
-          } else {
-            onSort(col, 'desc');
-          }
+        if (!onSort) return;
+        if (sortCol === col) {
+          onSort(col, sortDir === "asc" ? "desc" : "asc");
+        } else {
+          onSort(col, "desc");
         }
       }}
     >
-      {label}{icon}
+      {label}
+      {icon}
     </th>
   );
 };
 
-export default function StockTable({ stocks, onDeleteStock, deletingStockId, sortCol, sortDir, onSort }) {
+export default function StockTable({
+  stocks,
+  onDeleteStock,
+  deletingStockId,
+  sortCol,
+  sortDir,
+  onSort,
+  selectable = false,
+  selectedSymbols = new Set(),
+  onToggleSelect = null,
+  disableRowNavigation = false,
+  showDeleteAction = true,
+  noticeText = "Predictions based on 1-year linear regression. For informational purposes only.",
+}) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const isSelected = (stock) => selectedSymbols?.has?.(String(stock.symbol || "").toUpperCase());
+
   const handleRowClick = (stock) => {
+    if (disableRowNavigation) return;
     if (stock.id) {
       navigate(`/stocks/${stock.id}`, { state: { from: `${location.pathname}${location.search}` } });
     } else if (stock.symbol) {
@@ -70,16 +80,19 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
     <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-100">
       <div className="flex items-center gap-2 border-b border-slate-100 bg-amber-50/60 px-5 py-2.5">
         <svg className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          <path
+            fillRule="evenodd"
+            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+            clipRule="evenodd"
+          />
         </svg>
-        <span className="text-xs text-amber-700 font-medium">
-          Predictions based on 1-year linear regression. For informational purposes only.
-        </span>
+        <span className="text-xs font-medium text-amber-700">{noticeText}</span>
       </div>
 
       <div className="max-h-[70vh] overflow-y-auto overflow-x-hidden thin-scroll">
         <table className="w-full table-fixed text-[13px] text-slate-700 [font-variant-numeric:tabular-nums]">
           <colgroup>
+            {selectable && <col className="w-[4%]" />}
             <col className="w-[10%]" />
             <col className="w-[14%]" />
             <col className="w-[8%]" />
@@ -96,11 +109,12 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
           </colgroup>
           <thead>
             <tr className="sticky top-0 z-10 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-sm">
+              {selectable && <th className="whitespace-nowrap px-2.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide">Select</th>}
               <SortableHeader col="symbol" label="Symbol" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="left" />
-              <th className="px-2.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 whitespace-nowrap">Company</th>
+              <th className="whitespace-nowrap px-2.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide">Company</th>
               <SortableHeader col="current_price" label="Price" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
-              <th className="px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 whitespace-nowrap">Min</th>
-              <th className="px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 whitespace-nowrap">Max</th>
+              <th className="whitespace-nowrap px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide">Min</th>
+              <th className="whitespace-nowrap px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide">Max</th>
               <SortableHeader col="predicted_price_1d" label="Predicted" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="expected_change_pct" label="% Change" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="recommended_action" label="Signal" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />
@@ -108,7 +122,7 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
               <SortableHeader col="pe_ratio" label="PE" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="discount_pct" label="Discount %" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />
               <SortableHeader col="sentiment_score" label="Sentiment" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />
-              <th className="px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 whitespace-nowrap">Action</th>
+              {showDeleteAction && <th className="whitespace-nowrap px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide">Action</th>}
             </tr>
           </thead>
 
@@ -120,7 +134,7 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
                 (stock.predicted_price_1d !== null && stock.predicted_price_1d !== undefined);
               const currency = currencyCodeFromItem(stock);
               const changeUp = ok && Number(stock.expected_change_pct || 0) >= 0;
-              const clickable = stock.id || stock.symbol;
+              const clickable = (stock.id || stock.symbol) && !disableRowNavigation;
 
               return (
                 <tr
@@ -130,6 +144,18 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
                   }`}
                   onClick={() => handleRowClick(stock)}
                 >
+                  {selectable && (
+                    <td className="px-2.5 py-2.5">
+                      <input
+                        type="checkbox"
+                        checked={isSelected(stock)}
+                        onChange={() => onToggleSelect?.(stock)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                      />
+                    </td>
+                  )}
+
                   <td className="px-2.5 py-2.5">
                     <span className="block truncate text-[13px] font-semibold tracking-tight text-slate-900">{stock.symbol}</span>
                   </td>
@@ -175,9 +201,7 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
                     {normalizeAction(stock.recommended_action) ? (
                       <ActionBadge action={stock.recommended_action} />
                     ) : ok && stock.direction_signal ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600">
-                        {stock.direction_signal}
-                      </span>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600">{stock.direction_signal}</span>
                     ) : (
                       <span className="text-xs text-slate-400">{statusLabel(stock)}</span>
                     )}
@@ -226,21 +250,23 @@ export default function StockTable({ stocks, onDeleteStock, deletingStockId, sor
                     )}
                   </td>
 
-                  <td className="px-2.5 py-2.5 text-right whitespace-nowrap">
-                    {stock.symbol && (
-                      <button
-                        type="button"
-                        className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[11px] font-semibold text-rose-500 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 hover:bg-rose-50 disabled:opacity-40"
-                        disabled={deletingStockId === stock.symbol}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onDeleteStock) onDeleteStock(stock.symbol);
-                        }}
-                      >
-                        {deletingStockId === stock.symbol ? "…" : "Remove"}
-                      </button>
-                    )}
-                  </td>
+                  {showDeleteAction && (
+                    <td className="px-2.5 py-2.5 text-right whitespace-nowrap">
+                      {stock.symbol && (
+                        <button
+                          type="button"
+                          className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[11px] font-semibold text-rose-500 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 hover:bg-rose-50 disabled:opacity-40"
+                          disabled={deletingStockId === stock.symbol}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onDeleteStock) onDeleteStock(stock.symbol);
+                          }}
+                        >
+                          {deletingStockId === stock.symbol ? "…" : "Remove"}
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}

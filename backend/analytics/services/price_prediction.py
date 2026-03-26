@@ -325,7 +325,7 @@ def _fit_xgboost(feature_df: pd.DataFrame, frequency: str) -> ModelResult:
     )
 
 
-def _fit_lstm(feature_df: pd.DataFrame, frequency: str) -> ModelResult:
+def _load_tensorflow_keras():
     try:
         from tensorflow.keras.callbacks import EarlyStopping
         from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -334,6 +334,12 @@ def _fit_lstm(feature_df: pd.DataFrame, frequency: str) -> ModelResult:
         raise RuntimeError(
             "tensorflow is not installed. Install tensorflow to run the LSTM model."
         ) from exc
+
+    return EarlyStopping, LSTM, Dense, Dropout, Sequential
+
+
+def _fit_lstm(feature_df: pd.DataFrame, frequency: str) -> ModelResult:
+    EarlyStopping, LSTM, Dense, Dropout, Sequential = _load_tensorflow_keras()
 
     data = feature_df[FEATURE_COLUMNS].dropna().copy()
     if frequency == "hourly" and len(data) > 3000:
@@ -731,6 +737,7 @@ def run_prediction(
     if feature_df.empty or len(feature_df) < 100:
         raise RuntimeError("Unable to build sufficient features from historical data.")
 
+    # TensorFlow is only needed for the LSTM branch; XGBoost stays TensorFlow-free.
     if model == "xgboost":
         model_result = _fit_xgboost(feature_df=feature_df, frequency=frequency)
     else:
