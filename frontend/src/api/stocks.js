@@ -1,7 +1,12 @@
 import api from "./axios";
 
-export const fetchPortfolio = async () => {
-  const { data } = await api.get("portfolio/");
+export const fetchPortfolio = async (options = {}) => {
+  const queryParams = new URLSearchParams();
+  if (options.lite) queryParams.set("lite", "1");
+  const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  const { data } = await api.get(`portfolio/${suffix}`, {
+    timeout: 60000,
+  });
   return data;
 };
 
@@ -48,7 +53,9 @@ export const fetchStocks = async (portfolioId = null, options = {}) => {
       queryParams.set("diff_pct_max", String(options.diff_pct_max));
     }
 
-    const { data } = await api.get(`portfolio-stocks/?${queryParams.toString()}`);
+    const { data } = await api.get(`portfolio-stocks/?${queryParams.toString()}`, {
+      timeout: 60000,
+    });
     const rows = Array.isArray(data) ? data : [];
     return rows.map((item) => ({
       id: item.id,

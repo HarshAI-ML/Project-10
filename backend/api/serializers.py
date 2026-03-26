@@ -345,6 +345,9 @@ class PortfolioSerializer(serializers.ModelSerializer):
         fields = ("id", "name", "description", "is_default", "portfolio_type", "geography", "stock_count")
 
     def get_stock_count(self, obj):
+        annotated = getattr(obj, "stock_count_annotated", None)
+        if annotated is not None:
+            return annotated
         return obj.portfolio_stocks.count()
 
 

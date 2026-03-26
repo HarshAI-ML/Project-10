@@ -254,7 +254,7 @@ export default function Stocks() {
       setError("");
       try {
         const [portfolioData, stockData] = await Promise.all([
-          fetchPortfolio(),
+          fetchPortfolio({ lite: true }),
           fetchStocks(portfolioId, stockFetchOptions),
         ]);
         const pArr = Array.isArray(portfolioData) ? portfolioData : [];

@@ -4,7 +4,7 @@ import logging
 import os
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
-from django.db.models import Max, Min, Q
+from django.db.models import Count, Max, Min, Q
 from rest_framework import mixins, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
@@ -474,7 +474,12 @@ class PortfolioViewSet(
     serializer_class = PortfolioSerializer
 
     def get_queryset(self):
-        return Portfolio.objects.filter(user=self.request.user).order_by('-is_default', 'name')
+        return (
+            Portfolio.objects
+            .filter(user=self.request.user)
+            .annotate(stock_count_annotated=Count("portfolio_stocks"))
+            .order_by('-is_default', 'name')
+        )
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -485,6 +490,9 @@ class PortfolioViewSet(
         payload = list(serializer.data)
 
         if not payload:
+            return Response(payload)
+        lite = (request.query_params.get("lite") or "").strip().lower()
+        if lite in {"1", "true", "yes"}:
             return Response(payload)
 
         try:
@@ -1022,32 +1030,24 @@ class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         tickers = list(qs.values_list("ticker", flat=True))
 
-        latest_dates = (
+        # Use one query for latest row per ticker instead of N+1 lookups.
+        latest_rows = (
             SilverCleanedPrice.objects.filter(ticker__in=tickers)
-            .values("ticker")
-            .annotate(max_date=Max("date"))
-        )
-        silver_map = {}
-        for entry in latest_dates:
-            row = (
-                SilverCleanedPrice.objects.filter(
-                    ticker=entry["ticker"],
-                    date=entry["max_date"],
-                )
-                .values(
-                    "close",
-                    "ma_20",
-                    "rsi_14",
-                    "macd",
-                    "daily_return",
-                    "volatility_20",
-                    "bb_upper",
-                    "bb_lower",
-                )
-                .first()
+            .order_by("ticker", "-date")
+            .distinct("ticker")
+            .values(
+                "ticker",
+                "close",
+                "ma_20",
+                "rsi_14",
+                "macd",
+                "daily_return",
+                "volatility_20",
+                "bb_upper",
+                "bb_lower",
             )
-            if row:
-                silver_map[entry["ticker"]] = row
+        )
+        silver_map = {row["ticker"]: row for row in latest_rows}
 
         cutoff = date.today() - timedelta(days=365)
         ranges = (
