@@ -7,6 +7,7 @@ const ACTIVE_PORTFOLIO_KEY = "active_portfolio_id";
 const NAV_LINKS = [
   { label: "Portfolio",     path: "/portfolio",   key: "portfolio" },
   { label: "Stocks",        path: null,           key: "stocks"    },
+  { label: "Quality Stocks", path: "/quality-stocks", key: "quality-stocks" },
   { label: "Compare",       path: "/compare",     key: "compare"   },
   { label: "Prediction",    path: "/prediction",  key: "prediction"},
   { label: "Clusters",      path: null,           key: "clusters"  },
@@ -31,6 +32,7 @@ export default function Navbar() {
   const isActive = (key) => {
     if (key === "portfolio") return location.pathname === "/portfolio";
     if (key === "stocks")    return location.pathname.startsWith("/stocks");
+    if (key === "quality-stocks") return location.pathname.startsWith("/quality-stocks");
     if (key === "compare")   return location.pathname.startsWith("/compare");
     if (key === "prediction")return location.pathname.startsWith("/prediction");
     if (key === "clusters")  return location.pathname.includes("/clusters");

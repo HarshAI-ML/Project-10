@@ -161,6 +161,43 @@ export const fetchPortfolioTape = async (portfolioId, limit = 12) => {
   return Array.isArray(data) ? data : [];
 };
 
+export const fetchQualitySnapshot = async (portfolioId) => {
+  const { data } = await api.post("quality-stocks/snapshot/", { portfolio_id: portfolioId }, { timeout: 120000 });
+  return data;
+};
+
+export const generateQualityReports = async (portfolioId, stockIds) => {
+  const { data } = await api.post(
+    "quality-stocks/generate/",
+    { portfolio_id: portfolioId, stock_ids: stockIds },
+    { timeout: 180000 }
+  );
+  return data;
+};
+
+export const fetchQualityStocks = async (options = {}) => {
+  const queryParams = new URLSearchParams();
+  if (options.portfolio) queryParams.set("portfolio", String(options.portfolio));
+  if (options.signal && options.signal !== "all") queryParams.set("signal", String(options.signal).toUpperCase());
+  const suffix = queryParams.toString() ? `?${queryParams.toString()}` : "";
+  const { data } = await api.get(`quality-stocks/${suffix}`, { timeout: 60000 });
+  return Array.isArray(data) ? data : [];
+};
+
+export const fetchQualityStockDetail = async (qualityStockId) => {
+  const { data } = await api.get(`quality-stocks/${qualityStockId}/`, { timeout: 60000 });
+  return data;
+};
+
+export const rerunQualityStockReport = async (qualityStockId) => {
+  const { data } = await api.post(`quality-stocks/${qualityStockId}/rerun/`, {}, { timeout: 180000 });
+  return data;
+};
+
+export const deleteQualityStock = async (qualityStockId) => {
+  await api.delete(`quality-stocks/${qualityStockId}/`, { timeout: 60000 });
+};
+
 export const fetchLandingTape = async (limit = 16) => {
   const queryParams = new URLSearchParams({ limit: String(limit) });
   const { data } = await api.get(`stocks/tape/?${queryParams.toString()}`, {

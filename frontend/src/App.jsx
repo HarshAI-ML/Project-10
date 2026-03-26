@@ -17,6 +17,8 @@ const StockDetail = lazy(() => import("./pages/StockDetail"));
 const LiveStockDetail = lazy(() => import("./pages/LiveStockDetail"));
 const CompareStocks = lazy(() => import("./pages/CompareStocks"));
 const PricePrediction = lazy(() => import("./pages/PricePrediction"));
+const QualityStockReport = lazy(() => import("./pages/QualityStockReport"));
+const QualityStocks = lazy(() => import("./pages/QualityStocks"));
 const AutoSignal = lazy(() => import("./pages/AutoSignal"));
 const AutoSignalCompany = lazy(() => import("./pages/AutoSignalCompany"));
 
@@ -108,6 +110,22 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <PricePrediction />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quality-stocks"
+                element={
+                  <ProtectedRoute>
+                    <QualityStocks />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/quality-stocks/:id/report"
+                element={
+                  <ProtectedRoute>
+                    <QualityStockReport />
                   </ProtectedRoute>
                 }
               />

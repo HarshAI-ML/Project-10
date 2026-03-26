@@ -25,6 +25,20 @@ const ActionBadge = ({ action }) => {
   return <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ${style}`}>{normalized}</span>;
 };
 
+const AiRatingBadge = ({ value }) => {
+  if (value === null || value === undefined) {
+    return <span className="text-xs text-slate-400">—</span>;
+  }
+  const numeric = Number(value);
+  const style =
+    numeric >= 7.5
+      ? "bg-emerald-100 text-emerald-700"
+      : numeric >= 5
+      ? "bg-amber-100 text-amber-700"
+      : "bg-rose-100 text-rose-600";
+  return <span className={`inline-flex min-w-[72px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-bold ${style}`}>{numeric.toFixed(1)}/10</span>;
+};
+
 const SortableHeader = ({ col, label, sortCol, sortDir, onSort, align = "left" }) => {
   const isActive = sortCol === col;
   const icon = !isActive ? " ⇅" : sortDir === "asc" ? " ↑" : " ↓";
@@ -32,7 +46,7 @@ const SortableHeader = ({ col, label, sortCol, sortDir, onSort, align = "left" }
 
   return (
     <th
-      className={`cursor-pointer select-none px-2.5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 whitespace-nowrap hover:text-cyan-200 transition-colors ${alignClass}`}
+      className={`cursor-pointer select-none whitespace-nowrap px-2.5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-100/95 transition-colors hover:text-cyan-200 ${alignClass}`}
       onClick={() => {
         if (!onSort) return;
         if (sortCol === col) {
@@ -60,10 +74,13 @@ export default function StockTable({
   onToggleSelect = null,
   disableRowNavigation = false,
   showDeleteAction = true,
+  actionRenderer = null,
+  showAiRating = false,
   noticeText = "Predictions based on 1-year linear regression. For informational purposes only.",
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const showActionColumn = showDeleteAction || typeof actionRenderer === "function";
 
   const isSelected = (stock) => selectedSymbols?.has?.(String(stock.symbol || "").toUpperCase());
 
@@ -89,23 +106,24 @@ export default function StockTable({
         <span className="text-xs font-medium text-amber-700">{noticeText}</span>
       </div>
 
-      <div className="max-h-[70vh] overflow-y-auto overflow-x-hidden thin-scroll">
-        <table className="w-full table-fixed text-[13px] text-slate-700 [font-variant-numeric:tabular-nums]">
+      <div className="max-h-[70vh] overflow-auto thin-scroll">
+        <table className="min-w-[1560px] w-full table-fixed text-[13px] text-slate-700 [font-variant-numeric:tabular-nums]">
           <colgroup>
-            {selectable && <col className="w-[4%]" />}
-            <col className="w-[10%]" />
-            <col className="w-[14%]" />
-            <col className="w-[8%]" />
-            <col className="w-[7%]" />
-            <col className="w-[7%]" />
-            <col className="w-[8%]" />
-            <col className="w-[6%]" />
-            <col className="w-[6%]" />
-            <col className="w-[5%]" />
-            <col className="w-[6%]" />
-            <col className="w-[8%]" />
-            <col className="w-[9%]" />
-            <col className="w-[6%]" />
+            {selectable && <col className="w-[56px]" />}
+            <col className="w-[150px]" />
+            <col className="w-[230px]" />
+            <col className="w-[120px]" />
+            <col className="w-[110px]" />
+            <col className="w-[110px]" />
+            <col className="w-[130px]" />
+            <col className="w-[110px]" />
+            <col className="w-[100px]" />
+            {showAiRating && <col className="w-[110px]" />}
+            <col className="w-[80px]" />
+            <col className="w-[90px]" />
+            <col className="w-[120px]" />
+            <col className="w-[170px]" />
+            {showActionColumn && <col className="w-[280px]" />}
           </colgroup>
           <thead>
             <tr className="sticky top-0 z-10 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-sm">
@@ -118,11 +136,12 @@ export default function StockTable({
               <SortableHeader col="predicted_price_1d" label="Predicted" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="expected_change_pct" label="% Change" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="recommended_action" label="Signal" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />
+              {showAiRating && <SortableHeader col="ai_rating" label="AI Rating" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />}
               <SortableHeader col="model_confidence_r2" label="R²" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="pe_ratio" label="PE" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="right" />
               <SortableHeader col="discount_pct" label="Discount %" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />
               <SortableHeader col="sentiment_score" label="Sentiment" sortCol={sortCol} sortDir={sortDir} onSort={onSort} align="center" />
-              {showDeleteAction && <th className="whitespace-nowrap px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide">Action</th>}
+              {showActionColumn && <th className="whitespace-nowrap px-2.5 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide">Action</th>}
             </tr>
           </thead>
 
@@ -150,7 +169,7 @@ export default function StockTable({
                         type="checkbox"
                         checked={isSelected(stock)}
                         onChange={() => onToggleSelect?.(stock)}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
                         className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                       />
                     </td>
@@ -164,15 +183,15 @@ export default function StockTable({
                     <span className="block truncate text-[12px] text-slate-600">{stock.company_name}</span>
                   </td>
 
-                  <td className="px-2.5 py-2.5 text-right text-[13px] font-semibold text-slate-900 truncate">
+                  <td className="truncate px-2.5 py-2.5 text-right text-[13px] font-semibold text-slate-900">
                     {formatMoney(stock.current_price, currency)}
                   </td>
 
-                  <td className="px-2.5 py-2.5 text-right text-[12px] text-slate-500 truncate">
+                  <td className="truncate px-2.5 py-2.5 text-right text-[12px] text-slate-500">
                     {formatMoney(stock.min_price, currency)}
                   </td>
 
-                  <td className="px-2.5 py-2.5 text-right text-[12px] text-slate-500 truncate">
+                  <td className="truncate px-2.5 py-2.5 text-right text-[12px] text-slate-500">
                     {formatMoney(stock.max_price, currency)}
                   </td>
 
@@ -207,11 +226,17 @@ export default function StockTable({
                     )}
                   </td>
 
+                  {showAiRating && (
+                    <td className="px-2.5 py-2.5 text-center">
+                      <AiRatingBadge value={stock.ai_rating} />
+                    </td>
+                  )}
+
                   <td className="px-2.5 py-2.5 text-right text-[12px] text-slate-600">
                     {ok ? Number(stock.model_confidence_r2 || 0).toFixed(2) : "—"}
                   </td>
 
-                  <td className="px-2.5 py-2.5 text-right text-[12px] text-slate-600 truncate">{stock.pe_ratio ?? "—"}</td>
+                  <td className="truncate px-2.5 py-2.5 text-right text-[12px] text-slate-600">{stock.pe_ratio ?? "—"}</td>
 
                   <td className="px-2.5 py-2.5 text-center">
                     {stock.discount_pct !== null && stock.discount_pct !== undefined ? (
@@ -250,20 +275,24 @@ export default function StockTable({
                     )}
                   </td>
 
-                  {showDeleteAction && (
-                    <td className="px-2.5 py-2.5 text-right whitespace-nowrap">
-                      {stock.symbol && (
-                        <button
-                          type="button"
-                          className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[11px] font-semibold text-rose-500 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 hover:bg-rose-50 disabled:opacity-40"
-                          disabled={deletingStockId === stock.symbol}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (onDeleteStock) onDeleteStock(stock.symbol);
-                          }}
-                        >
-                          {deletingStockId === stock.symbol ? "…" : "Remove"}
-                        </button>
+                  {showActionColumn && (
+                    <td className="px-2.5 py-2.5 text-right align-middle">
+                      {typeof actionRenderer === "function" ? (
+                        <div onClick={(event) => event.stopPropagation()}>{actionRenderer(stock)}</div>
+                      ) : (
+                        stock.symbol && (
+                          <button
+                            type="button"
+                            className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[11px] font-semibold text-rose-500 opacity-100 transition hover:bg-rose-50 disabled:opacity-40 md:opacity-0 md:group-hover:opacity-100"
+                            disabled={deletingStockId === stock.symbol}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (onDeleteStock) onDeleteStock(stock.symbol);
+                            }}
+                          >
+                            {deletingStockId === stock.symbol ? "..." : "Remove"}
+                          </button>
+                        )
                       )}
                     </td>
                   )}

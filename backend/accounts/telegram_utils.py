@@ -1,6 +1,5 @@
 import os
 import base64
-import qrcode
 from io import BytesIO
 import requests
 from django.conf import settings
@@ -28,6 +27,11 @@ def generate_qr_code_with_ref(ref_id):
         }
     """
     try:
+        try:
+            import qrcode
+        except ImportError as exc:
+            raise RuntimeError("qrcode package is required for Telegram QR generation.") from exc
+
         bot_username = os.getenv('TELEGRAM_BOT_USERNAME', 'auto_invest_bot')
 
         # Create QR code using the Telegram deep link payload so scanners open the bot directly

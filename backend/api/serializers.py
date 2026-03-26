@@ -10,7 +10,7 @@ from analytics.data_access import (
     get_latest_signals_bulk,
     get_stocks_sentiment_bulk,
 )
-from portfolio.models import Portfolio, Stock, PortfolioStock
+from portfolio.models import Portfolio, PortfolioStock, QualityStock, Stock
 
 
 def _infer_currency_from_symbol(symbol: str) -> str:
@@ -414,6 +414,36 @@ class PredictionRunSerializer(serializers.Serializer):
     model_type = serializers.ChoiceField(choices=["xgboost", "lstm"])
     prediction_frequency = serializers.ChoiceField(choices=["hourly", "daily", "weekly", "monthly"])
     historical_period = serializers.ChoiceField(choices=["6mo", "1y", "2y", "5y"])
+
+
+class QualityStockGenerateSerializer(serializers.Serializer):
+    portfolio_id = serializers.IntegerField()
+    stock_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False)
+
+
+class QualityStockSnapshotSerializer(serializers.Serializer):
+    portfolio_id = serializers.IntegerField()
+
+
+class QualityStockFilterSerializer(serializers.Serializer):
+    portfolio = serializers.IntegerField(required=False)
+    signal = serializers.ChoiceField(choices=["all", "BUY", "HOLD", "SELL"], required=False, default="all")
+
+
+class QualityStockSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QualityStock
+        fields = (
+            "id",
+            "stock",
+            "portfolio",
+            "ai_rating",
+            "buy_signal",
+            "report_json",
+            "graphs_data",
+            "generated_at",
+            "selected_by_user",
+        )
 
 
 # ─── Telegram OTP Serializers ─────────────────────────────────────

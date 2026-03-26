@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from portfolio.models import Portfolio, PortfolioStock, Stock, StockMaster
+from portfolio.models import Portfolio, PortfolioStock, QualityStock, Stock, StockMaster
 
 
 @admin.register(Portfolio)
@@ -30,3 +30,11 @@ class StockMasterAdmin(admin.ModelAdmin):
     search_fields = ['ticker', 'name']
     ordering = ['geography', 'sector', 'ticker']
     list_per_page = 50
+
+
+@admin.register(QualityStock)
+class QualityStockAdmin(admin.ModelAdmin):
+    list_display = ("id", "stock", "portfolio", "ai_rating", "buy_signal", "selected_by_user", "generated_at")
+    list_filter = ("buy_signal", "selected_by_user", "portfolio")
+    search_fields = ("stock__symbol", "stock__company_name", "portfolio__name")
+    ordering = ("-generated_at",)

@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import Loader from "../components/Loader";
+import QualityResearchModal from "../components/QualityResearchModal";
 import StockTable from "../components/StockTable";
 import { currencyCodeFromItem, formatMoney } from "../utils/currency";
 import {
@@ -76,6 +77,7 @@ export default function Stocks() {
   const [tableLoading, setTableLoading] = useState(false);
   const [error, setError] = useState("");
   const [openingClusters, setOpeningClusters] = useState(false);
+  const [showResearchModal, setShowResearchModal] = useState(false);
   const [chartMode, setChartMode] = useState("pe");
 
   // Server-side factor filters
@@ -346,6 +348,17 @@ export default function Stocks() {
     } finally { setDeletingStockId(null); }
   };
 
+  const handleQualityReportsGenerated = (response) => {
+    setShowResearchModal(false);
+    const firstReport = Array.isArray(response?.results) ? response.results[0] : null;
+    const reportId = firstReport?.quality_stock_id || firstReport?.id;
+    if (reportId) {
+      navigate(`/quality-stocks/${reportId}/report`);
+      return;
+    }
+    navigate("/quality-stocks");
+  };
+
   return (
     <section className="space-y-8">
       {/* ── Header ── */}
@@ -359,6 +372,14 @@ export default function Stocks() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={!portfolioId || loading || tableLoading || stocks.length === 0}
+            onClick={() => setShowResearchModal(true)}
+            className="rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-indigo-700 hover:to-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Research
+          </button>
           <button
             type="button"
             disabled={openingClusters}
@@ -1076,6 +1097,14 @@ export default function Stocks() {
           )}
         </div>
       )}
+
+      <QualityResearchModal
+        open={showResearchModal}
+        portfolioId={portfolioId}
+        portfolioName={selectedPortfolio?.name}
+        onClose={() => setShowResearchModal(false)}
+        onGenerated={handleQualityReportsGenerated}
+      />
     </section>
   );
 }

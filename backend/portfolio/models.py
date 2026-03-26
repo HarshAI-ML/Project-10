@@ -127,3 +127,42 @@ class StockMaster(models.Model):
         return f"{self.ticker} - {self.name} ({self.geography})"
 
 
+class QualityStock(models.Model):
+    """
+    Stores generated quality-stock research reports without duplicating stock data.
+    All descriptive stock fields are resolved via the related Stock row and analytics joins.
+    """
+
+    SIGNAL_CHOICES = [
+        ("BUY", "Buy"),
+        ("HOLD", "Hold"),
+        ("SELL", "Sell"),
+    ]
+
+    stock = models.ForeignKey(
+        Stock,
+        on_delete=models.CASCADE,
+        related_name="quality_reports",
+    )
+    portfolio = models.ForeignKey(
+        Portfolio,
+        on_delete=models.CASCADE,
+        related_name="quality_stocks",
+    )
+    ai_rating = models.FloatField()
+    buy_signal = models.CharField(max_length=10, choices=SIGNAL_CHOICES)
+    report_json = models.JSONField(default=dict)
+    graphs_data = models.JSONField(default=dict)
+    generated_at = models.DateTimeField(auto_now=True)
+    selected_by_user = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-generated_at", "stock__symbol"]
+        constraints = [
+            models.UniqueConstraint(fields=["portfolio", "stock"], name="uq_quality_stock_portfolio_stock"),
+        ]
+
+    def __str__(self):
+        return f"{self.portfolio.name} | {self.stock.symbol} | {self.buy_signal} | {self.ai_rating:.1f}"
+
+

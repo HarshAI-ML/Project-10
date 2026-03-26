@@ -20,7 +20,10 @@ from api.serializers import (
     ForgotPasswordSerializer,
     LoginSerializer,
     PortfolioSerializer,
+    QualityStockFilterSerializer,
+    QualityStockGenerateSerializer,
     PredictionRunSerializer,
+    QualityStockSnapshotSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
     ChatMessageSerializer,
@@ -28,6 +31,12 @@ from api.serializers import (
     StockListSerializer,
     TelegramOTPVerifySerializer,
     TelegramQRGenerateSerializer,
+)
+from api.quality_stocks import (
+    build_quality_snapshot,
+    build_quality_stock_rows,
+    generate_quality_reports,
+    get_quality_stock_detail,
 )
 from accounts.models import TelegramOTP
 from accounts.telegram_utils import (
@@ -57,7 +66,7 @@ from analytics.services.yahoo_search import (
     search_live_stocks,
 )
 from pipeline.models import SilverCleanedPrice
-from portfolio.models import Portfolio, PortfolioStock, Stock, StockMaster
+from portfolio.models import Portfolio, PortfolioStock, QualityStock, Stock, StockMaster
 from portfolio.services import create_default_portfolios_for_user, user_has_default_portfolios
 from api.chatbot_service import generate_chat_response
 
@@ -885,6 +894,98 @@ class PredictionViewSet(viewsets.GenericViewSet):
 
 from rest_framework.permissions import IsAuthenticated
 from api.serializers import PortfolioStockSerializer
+
+
+class QualityStockViewSet(
+    mixins.DestroyModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.ListModelMixin,
+    viewsets.GenericViewSet,
+):
+    permission_classes = [IsAuthenticated]
+    queryset = QualityStock.objects.all().select_related("stock", "portfolio")
+
+    def get_queryset(self):
+        return self.queryset.filter(portfolio__user=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        serializer = QualityStockFilterSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        rows = build_quality_stock_rows(
+            request.user,
+            portfolio_id=serializer.validated_data.get("portfolio"),
+            signal=serializer.validated_data.get("signal", "all"),
+        )
+        return Response(rows, status=status.HTTP_200_OK)
+
+    def retrieve(self, request, *args, **kwargs):
+        payload = get_quality_stock_detail(request.user, int(kwargs["pk"]))
+        if not payload:
+            return Response({"detail": "Quality stock report not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="snapshot")
+    def snapshot(self, request):
+        serializer = QualityStockSnapshotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        portfolio = Portfolio.objects.filter(id=serializer.validated_data["portfolio_id"], user=request.user).first()
+        if not portfolio:
+            return Response({"detail": "Portfolio not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        rows = build_quality_snapshot(portfolio)
+        return Response(
+            {
+                "portfolio_id": portfolio.id,
+                "portfolio_name": portfolio.name,
+                "shortlist": rows,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="generate")
+    def generate(self, request):
+        serializer = QualityStockGenerateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        portfolio = Portfolio.objects.filter(id=serializer.validated_data["portfolio_id"], user=request.user).first()
+        if not portfolio:
+            return Response({"detail": "Portfolio not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        saved_rows = generate_quality_reports(
+            portfolio=portfolio,
+            stock_ids=serializer.validated_data["stock_ids"],
+            selected_by_user=True,
+        )
+        detail_rows = [
+            get_quality_stock_detail(request.user, row["id"])
+            for row in saved_rows
+        ]
+        detail_rows = [row for row in detail_rows if row]
+        return Response(
+            {
+                "portfolio_id": portfolio.id,
+                "portfolio_name": portfolio.name,
+                "generated_count": len(detail_rows),
+                "results": detail_rows,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="rerun")
+    def rerun(self, request, pk=None):
+        quality_stock = self.get_queryset().filter(id=pk).first()
+        if not quality_stock:
+            return Response({"detail": "Quality stock report not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        saved_rows = generate_quality_reports(
+            portfolio=quality_stock.portfolio,
+            stock_ids=[quality_stock.stock_id],
+            selected_by_user=quality_stock.selected_by_user,
+        )
+        if not saved_rows:
+            return Response({"detail": "Unable to regenerate report."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        payload = get_quality_stock_detail(request.user, saved_rows[0]["id"])
+        return Response(payload, status=status.HTTP_200_OK)
 
 class PortfolioStockViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class   = PortfolioStockSerializer
