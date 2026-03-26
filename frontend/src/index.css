@@ -5,8 +5,12 @@
 
 body {
   font-family: "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background:
+    radial-gradient(900px 520px at 0% -10%, rgba(99, 102, 241, 0.14), transparent 62%),
+    radial-gradient(700px 420px at 100% 0%, rgba(56, 189, 248, 0.1), transparent 58%),
+    linear-gradient(165deg, #f6f9ff 0%, #edf3ff 48%, #f7fbff 100%);
   min-height: 100vh;
+  background-attachment: fixed;
 }
 
 .card {

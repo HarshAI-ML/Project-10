@@ -22,10 +22,31 @@ export default function App() {
   const isHome = location.pathname === "/";
 
   return (
-    <div className="min-h-screen">
+    <div
+      className={
+        isHome
+          ? "min-h-screen"
+          : "relative min-h-screen overflow-x-hidden bg-gradient-to-br from-slate-100 via-indigo-100 to-cyan-100"
+      }
+    >
+      {!isHome && (
+        <>
+          <div className="pointer-events-none absolute -left-24 top-20 h-80 w-80 rounded-full bg-cyan-300/35 blur-3xl" />
+          <div className="pointer-events-none absolute right-[-5rem] top-32 h-96 w-96 rounded-full bg-indigo-300/30 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-[-8rem] left-1/3 h-96 w-96 rounded-full bg-fuchsia-300/20 blur-3xl" />
+          <div className="pointer-events-none absolute inset-0 opacity-[0.28] [background-image:radial-gradient(rgba(99,102,241,0.16)_1px,transparent_1px)] [background-size:22px_22px]" />
+        </>
+      )}
       {!isHome && <Navbar />}
-      <main className={isHome ? "" : "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8"}>
-        <div key={location.pathname} className="page-enter">
+      <main
+        className={
+          isHome
+            ? ""
+            : "relative mx-auto mt-4 w-full max-w-7xl rounded-3xl border border-white/70 bg-white/76 px-4 py-6 shadow-[0_20px_60px_-25px_rgba(30,41,59,0.35)] backdrop-blur-xl sm:px-6 lg:px-8"
+        }
+      >
+        {!isHome && <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-br from-white/35 via-transparent to-indigo-100/30" />}
+        <div key={location.pathname} className="page-enter relative">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
