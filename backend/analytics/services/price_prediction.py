@@ -11,12 +11,13 @@ import pandas as pd
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Count, Max, Min
 from django.utils import timezone
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from analytics.models import PredictionModelState, PredictionResultCache
-from portfolio.models import Stock
+from portfolio.models import StockMaster
 from scripts.nifty500_top200 import ALL_STOCKS
 
 # Full universe of supported tickers (400 stocks: Nifty 200 + S&P 500 top 200)
@@ -36,11 +37,18 @@ HOURLY_PERIOD_MAP = {
     "5y": "730d",
 }
 MODEL_TYPES = {"xgboost", "lstm"}
-PREDICTION_FREQUENCIES = {"hourly", "daily", "weekly", "monthly"}
-FORECAST_POINTS = {"hourly": 24, "daily": 30, "weekly": 12, "monthly": 6}
+PREDICTION_FREQUENCIES = {"daily", "weekly", "monthly"}
+FORECAST_POINTS = {"daily": 30, "weekly": 12, "monthly": 6}
 CACHE_VALID_HOURS = 24
 HOURLY_CACHE_VALID_HOURS = 1
 MODEL_REFRESH_WINDOWS = {"xgboost": timedelta(hours=24), "lstm": timedelta(days=3)}
+
+HISTORICAL_PERIOD_OPTIONS = [
+    {"value": "6mo", "label": "6 Months", "days": 180},
+    {"value": "1y", "label": "1 Year", "days": 365},
+    {"value": "2y", "label": "2 Years", "days": 730},
+    {"value": "5y", "label": "5 Years", "days": 1825},
+]
 
 FEATURE_COLUMNS = [
     "close",
@@ -125,6 +133,42 @@ def _format_timestamp(ts: pd.Timestamp, frequency: str) -> str:
     return ts.strftime("%Y-%m-%d %H:%M") if frequency == "hourly" else ts.strftime("%Y-%m-%d")
 
 
+def _history_coverage_days(row: dict[str, Any] | None) -> int:
+    if not row or not row.get("min_date") or not row.get("max_date"):
+        return 0
+    return max((row["max_date"] - row["min_date"]).days + 1, 0)
+
+
+def _max_period_for_coverage(coverage_days: int) -> str | None:
+    supported = [item for item in HISTORICAL_PERIOD_OPTIONS if coverage_days >= item["days"]]
+    return supported[-1]["value"] if supported else None
+
+
+def _available_frequencies_for_period(max_period: str | None) -> list[str]:
+    if not max_period:
+        return []
+    return ["daily", "weekly", "monthly"]
+
+
+def _historical_period_payload() -> list[dict[str, Any]]:
+    return [
+        {"value": item["value"], "label": item["label"], "days": item["days"]}
+        for item in HISTORICAL_PERIOD_OPTIONS
+    ]
+
+
+def _build_data_coverage_map(model) -> dict[str, dict[str, Any]]:
+    rows = (
+        model.objects.values("ticker")
+        .annotate(
+            row_count=Count("id"),
+            min_date=Min("date"),
+            max_date=Max("date"),
+        )
+    )
+    return {row["ticker"]: dict(row) for row in rows}
+
+
 def _validate_params(
     stock_symbol: str,
     model_type: str,
@@ -141,7 +185,7 @@ def _validate_params(
     if model not in MODEL_TYPES:
         raise ValueError("Model must be one of: xgboost, lstm.")
     if frequency not in PREDICTION_FREQUENCIES:
-        raise ValueError("Prediction frequency must be one of: hourly, daily, weekly, monthly.")
+        raise ValueError("Prediction frequency must be one of: daily, weekly, monthly.")
     if period not in HISTORICAL_PERIODS:
         raise ValueError("Historical period must be one of: 6mo, 1y, 2y, 5y.")
     if frequency == "hourly" and period == "5y":
@@ -150,7 +194,7 @@ def _validate_params(
 
 
 def _series_from_history(symbol: str, period: str, frequency: str) -> pd.Series:
-    from analytics.data_access import get_stock_history
+    from analytics.data_access import get_silver_history
     days_map = {
         "6mo": 180,
         "1y": 365,
@@ -158,7 +202,7 @@ def _series_from_history(symbol: str, period: str, frequency: str) -> pd.Series:
         "5y": 1825,
     }
     days = days_map.get(period, 365)
-    df = get_stock_history(symbol, days=days)
+    df = get_silver_history(symbol, days=days)
     if df.empty:
         return pd.Series(dtype="float64")
     
@@ -598,25 +642,54 @@ def _compose_response(
 
 
 def get_prediction_options() -> dict[str, Any]:
-    stocks = list(
-        Stock.objects.order_by("symbol")
-        .values("symbol", "company_name")
-        .distinct()
-    )
+    from pipeline.models import BronzeStockPrice, SilverCleanedPrice
+
+    silver_map = _build_data_coverage_map(SilverCleanedPrice)
+    bronze_map = _build_data_coverage_map(BronzeStockPrice)
+    stocks = []
+    for row in (
+        StockMaster.objects.filter(is_active=True)
+        .order_by("ticker")
+        .values("ticker", "name", "sector", "geography")
+    ):
+        ticker = row["ticker"]
+        source = "silver" if ticker in silver_map else "bronze" if ticker in bronze_map else ""
+        source_row = silver_map.get(ticker) or bronze_map.get(ticker)
+        coverage_days = _history_coverage_days(source_row)
+        row_count = int(source_row.get("row_count") or 0) if source_row else 0
+        max_period = _max_period_for_coverage(coverage_days)
+        if row_count < 120 or not max_period:
+            continue
+
+        stocks.append(
+            {
+                "symbol": ticker,
+                "ticker": ticker,
+                "company_name": row["name"],
+                "name": row["name"],
+                "sector": row["sector"],
+                "geography": row["geography"],
+                "data_source": source,
+                "history_row_count": row_count,
+                "history_coverage_days": coverage_days,
+                "max_historical_period": max_period,
+                "available_historical_periods": [max_period],
+                "available_prediction_frequencies": _available_frequencies_for_period(
+                    max_period
+                ),
+            }
+        )
+
+    if not stocks:
+        stocks = []
     return {
         "stocks": stocks,
-        "historical_periods": [
-            {"value": "6mo", "label": "6 Months"},
-            {"value": "1y", "label": "1 Year"},
-            {"value": "2y", "label": "2 Years"},
-            {"value": "5y", "label": "5 Years"},
-        ],
+        "historical_periods": _historical_period_payload(),
         "models": [
             {"value": "xgboost", "label": "XGBoost"},
             {"value": "lstm", "label": "LSTM"},
         ],
         "prediction_frequencies": [
-            {"value": "hourly", "label": "Hourly prediction (24-hour)"},
             {"value": "daily", "label": "Daily prediction"},
             {"value": "weekly", "label": "Weekly prediction (7 day)"},
             {"value": "monthly", "label": "Monthly prediction (30 day)"},
@@ -652,7 +725,7 @@ def run_prediction(
 
     close_series = _series_from_history(symbol=symbol, period=period, frequency=frequency)
     if len(close_series) < 120:
-        raise RuntimeError("Insufficient historical data returned from yfinance.")
+        raise RuntimeError("Insufficient historical data returned from the database.")
 
     feature_df = _build_feature_frame(close_series).dropna().copy()
     if feature_df.empty or len(feature_df) < 100:
@@ -744,7 +817,11 @@ def warm_prediction_models(symbols: list[str] | None = None, model: str | None =
     selected_models = [model.lower()] if model else ["xgboost", "lstm"]
     symbols_to_use = [s.strip().upper() for s in (symbols or []) if s.strip()]
     if not symbols_to_use:
-        symbols_to_use = list(Stock.objects.order_by("symbol").values_list("symbol", flat=True)[:5])
+        symbols_to_use = list(
+            StockMaster.objects.filter(is_active=True)
+            .order_by("ticker")
+            .values_list("ticker", flat=True)[:5]
+        )
     if not symbols_to_use:
         symbols_to_use = ["AAPL"]
 

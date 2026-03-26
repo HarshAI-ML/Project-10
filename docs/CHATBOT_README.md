@@ -65,6 +65,70 @@ Response JSON:
    - `CHAT_PROVIDER=auto` -> Groq first, OpenRouter fallback
 7. Reply is returned as `{ reply, mode }`.
 
+## Detailed Dataflow
+
+### Input Processing
+- Raw inputs: `user` (Django User/AnonymousUser), `message` (str), `history` (list of dicts)
+- History normalized to last 10 messages (user/assistant roles only, content truncated to 1000 chars)
+- Base state created: `{message, history, is_authenticated, user}`
+
+### Quantitative Short-Circuit (Authenticated Users Only)
+- Runs only if `is_authenticated=True`
+- `_resolve_metric_from_query()`: Maps phrases like "highest PE" → `"trailing_pe"`
+- `_resolve_direction_from_query()`: Maps "highest"/"lowest" → `"max"`/`"min"`
+- If both identified → calls `_answer_quant_query()`:
+  - Builds user context payload:
+    - Portfolios: `Portfolio.objects.filter(user=user)`
+    - Stock holdings: `PortfolioStock` join table
+    - Bulk data fetches: prices, forecasts, signals, sentiment, fundamentals, latest prices
+    - Query-aware pruning via `_keyword_score()` to limit context
+    - Structured as JSON: `{account_profile, summary, portfolios[], stocks[]}`
+  - Applies inferred filters (geography/sector/portfolio from query text)
+  - Finds min/max of requested metric among matching stocks
+  - Returns formatted string if successful → exits with `{"reply": <answer>, "mode": "personalized"}`
+
+### Routing & Context Building (When quantitative check fails or user is guest)
+- Decision point: `LANGGRAPH_AVAILABLE?`
+  - If False: Uses fallback path (direct LLM call)
+  - If True: Uses LangGraph state machine
+- For authenticated users requiring LLM processing:
+  - Builds user context JSON (same as quantitative path data)
+  - Serializes to string for LLM prompt injection
+  - Contains: account info, portfolio summaries, detailed stock data with all metrics
+
+### LLM Interaction (Convergence Point)
+- Function: `_call_chat_model(system_prompt, history, user_message)`
+- Provider selection:
+  - `CHAT_PROVIDER=openrouter` → OpenRouter only
+  - `CHAT_PROVIDER=groq` → Groq only
+  - `auto/default` → Groq first, OpenRouter fallback
+- Prompt construction:
+  - Guest mode: General investing guidance prompt
+  - Auth mode: Personalized prompt with `USER_CONTEXT_JSON:` prefix + context data
+- API call to selected provider:
+  - Sends: `[system_msg] + normalized history + [user_msg]`
+  - Parameters: `model` (varies by provider), `temperature=0.35`, `max_tokens=450`, timeout
+  - Returns: LLM response text or error fallback message
+
+### Response Formatting
+- Strips whitespace from LLM response
+- Empty responses replaced with: `"I could not generate a response right now. Please try again."`
+- Mode determined: `"personalized"` if authenticated, else `"generic"`
+- Final output: `{"reply": <text>, "mode": "<personalized|generic>"}`
+
+## Data Sources & Transformations
+
+| Stage | Data Origin | Transformation |
+|-------|-------------|----------------|
+| **Input** | HTTP Request | History normalization & truncation |
+| **Quant Check** | Portfolio + Analytics tables | Metric resolution + filtering → direct answer |
+| **Context Build** | Portfolio, PortfolioStock + Analytics DB tables | Bulk-fetched metrics → JSON serialization |
+| **LLM Input** | Context JSON + conversation history | Token-limited prompt assembly |
+| **LLM Output** | Groq/OpenRouter API | Text response (with fallbacks) |
+| **Final Output** | LLM output + auth flag | `{reply: str, mode: str}` |
+
+All data accesses use standard SQL through Django ORM - **no vector database** is involved in this chatbot flow. The Medallion pipeline (Bronze/Silver/Gold) populates the underlying tables that the chatbot queries.
+
 ## Personalized Context (Authenticated)
 
 For logged-in users, `_build_user_context_payload(...)` gathers live account context from DB/services:

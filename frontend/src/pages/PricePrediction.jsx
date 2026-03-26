@@ -25,6 +25,16 @@ const SearchableDropdown = ({ value, onChange, options, disabled }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const wrapperRef = useRef(null);
 
+  const normalizedOptions = (options || []).map((item) => {
+    const symbol = item.symbol || item.ticker || "";
+    const companyName = item.company_name || item.name || symbol;
+    return {
+      ...item,
+      symbol,
+      company_name: companyName,
+    };
+  });
+
   useEffect(() => {
     function handleClickOutside(event) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
@@ -35,13 +45,13 @@ const SearchableDropdown = ({ value, onChange, options, disabled }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredOptions = (options || []).filter(
+  const filteredOptions = normalizedOptions.filter(
     (item) =>
       item.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (item.company_name && item.company_name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const selectedOption = (options || []).find((opt) => opt.symbol === value);
+  const selectedOption = normalizedOptions.find((opt) => opt.symbol === value);
 
   return (
     <div className="relative w-full" ref={wrapperRef}>
@@ -54,7 +64,7 @@ const SearchableDropdown = ({ value, onChange, options, disabled }) => {
         <span className="truncate">
           {selectedOption
             ? `${selectedOption.symbol} - ${selectedOption.company_name || selectedOption.symbol}`
-            : (!options || options.length === 0)
+            : (!normalizedOptions || normalizedOptions.length === 0)
               ? "No stocks available"
               : "Select a stock"}
         </span>
@@ -124,19 +134,61 @@ export default function PricePrediction() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  const stockOptions = useMemo(
+    () =>
+      (options.stocks || []).map((item) => ({
+        symbol: item.symbol || item.ticker || "",
+        company_name: item.company_name || item.name || item.symbol || item.ticker || "",
+        data_source: item.data_source || "",
+        available_historical_periods: item.available_historical_periods || [],
+        available_prediction_frequencies: item.available_prediction_frequencies || [],
+        max_historical_period: item.max_historical_period || "",
+        history_row_count: item.history_row_count || 0,
+        history_coverage_days: item.history_coverage_days || 0,
+      })),
+    [options.stocks]
+  );
+
+  const selectedStock = useMemo(
+    () => stockOptions.find((item) => item.symbol === form.stock_symbol) || null,
+    [stockOptions, form.stock_symbol]
+  );
+
   const filteredHistoricalPeriods = useMemo(() => {
     const periods = options.historical_periods || [];
-    if (form.prediction_frequency !== "hourly") return periods;
-    return periods.filter((item) => item.value !== "5y");
-  }, [options.historical_periods, form.prediction_frequency]);
+    if (!selectedStock) return periods;
+
+    const selectedPeriod = selectedStock.max_historical_period;
+    if (!selectedPeriod) return periods;
+    return periods.filter((item) => item.value === selectedPeriod);
+  }, [options.historical_periods, form.prediction_frequency, selectedStock]);
+
+  const filteredPredictionFrequencies = useMemo(() => {
+    const frequencies = options.prediction_frequencies || [];
+    if (!selectedStock) return frequencies;
+
+    const allowed = new Set(selectedStock.available_prediction_frequencies || []);
+    return frequencies.filter((item) => allowed.size === 0 || allowed.has(item.value));
+  }, [options.prediction_frequencies, selectedStock]);
 
   useEffect(() => {
-    if (form.prediction_frequency !== "hourly") return;
-    if (form.historical_period !== "5y") return;
-    const fallback = filteredHistoricalPeriods.find((item) => item.value === "2y")
-      || filteredHistoricalPeriods[0];
-    if (fallback) {
+    if (!filteredPredictionFrequencies.length) return;
+    const currentIsAllowed = filteredPredictionFrequencies.some((item) => item.value === form.prediction_frequency);
+    if (!currentIsAllowed) {
+      const fallback = filteredPredictionFrequencies[0];
+      setForm((prev) => ({ ...prev, prediction_frequency: fallback.value }));
+    }
+  }, [form.prediction_frequency, filteredPredictionFrequencies]);
+
+  useEffect(() => {
+    if (!filteredHistoricalPeriods.length) return;
+    const currentIsAllowed = filteredHistoricalPeriods.some((item) => item.value === form.historical_period);
+    if (!currentIsAllowed) {
+      const fallback =
+        filteredHistoricalPeriods.find((item) => item.value === "1y") ||
+        filteredHistoricalPeriods[0];
       setForm((prev) => ({ ...prev, historical_period: fallback.value }));
+      return;
     }
   }, [form.prediction_frequency, form.historical_period, filteredHistoricalPeriods]);
 
@@ -147,10 +199,12 @@ export default function PricePrediction() {
       try {
         const data = await fetchPredictionOptions();
         setOptions(data || {});
-        const firstSymbol = data?.stocks?.[0]?.symbol || "";
+        const firstSymbol = data?.stocks?.[0]?.symbol || data?.stocks?.[0]?.ticker || "";
+        const firstPeriod = data?.stocks?.[0]?.max_historical_period || data?.historical_periods?.[0]?.value || "1y";
         setForm((prev) => ({
           ...prev,
           stock_symbol: prev.stock_symbol || firstSymbol,
+          historical_period: prev.historical_period || firstPeriod,
         }));
       } catch {
         setError("Unable to load prediction options.");
@@ -253,14 +307,14 @@ export default function PricePrediction() {
         <label className="space-y-2">
           <span className="text-sm font-semibold text-slate-700">
             Stock Selector{" "}
-            <span className="text-xs font-normal text-slate-500">
-              (Portfolio stocks only)
-            </span>
+            {/* <span className="text-xs font-normal text-slate-500">
+              (Stocks with stored history)
+            </span> */}
           </span>
           <SearchableDropdown
             value={form.stock_symbol}
             onChange={(val) => handleChange("stock_symbol", val)}
-            options={options.stocks}
+            options={stockOptions}
             disabled={loadingOptions || submitting}
           />
         </label>
@@ -273,6 +327,11 @@ export default function PricePrediction() {
             disabled={loadingOptions || submitting}
             onChange={(e) => handleChange("historical_period", e.target.value)}
           >
+            {filteredHistoricalPeriods.length === 0 && (
+              <option value="" disabled>
+                No history available
+              </option>
+            )}
             {filteredHistoricalPeriods.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
@@ -305,7 +364,7 @@ export default function PricePrediction() {
             disabled={loadingOptions || submitting}
             onChange={(e) => handleChange("prediction_frequency", e.target.value)}
           >
-            {(options.prediction_frequencies || []).map((item) => (
+            {(filteredPredictionFrequencies || []).map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
               </option>

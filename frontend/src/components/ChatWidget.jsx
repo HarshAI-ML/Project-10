@@ -11,6 +11,25 @@ const buildWelcomeMessage = (isAuthenticated) => ({
 
 const createSessionId = () => `s_${Math.random().toString(36).slice(2, 10)}`;
 
+const getDefaultSuggestions = (isAuthenticated) =>
+  isAuthenticated
+    ? [
+        "Which stock in my portfolio has the highest expected upside?",
+        "Which holding has the best buy signal right now?",
+        "Which stock has the lowest P/E ratio in my portfolio?",
+        "What are the riskiest holdings in my current portfolio?",
+        "Show me the strongest stock by sentiment in my portfolio.",
+        "What is my portfolio missing for better balance?",
+      ]
+    : [
+        "What is a simple way to start investing?",
+        "How do I reduce risk in a stock portfolio?",
+        "What is the difference between price and value?",
+        "Which sectors usually look safer in uncertain markets?",
+        "How do I read a buy, hold, or sell signal?",
+        "What should I check before buying a stock?",
+      ];
+
 const normalizeAssistantContent = (text) => {
   const raw = String(text || "").replace(/\r\n/g, "\n");
   if (!raw.includes("|")) return raw;
@@ -28,6 +47,7 @@ export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState(() => getDefaultSuggestions(isAuthenticated));
   const [messages, setMessages] = useState(() => [buildWelcomeMessage(isAuthenticated)]);
 
   const identityKey = useMemo(() => (isAuthenticated ? `user:${user?.username || "unknown"}` : "guest"), [
@@ -48,6 +68,7 @@ export default function ChatWidget() {
     // Account changed (or guest/auth mode changed): start a fresh session + clear old in-memory chat.
     setMessages([buildWelcomeMessage(isAuthenticated)]);
     setInput("");
+    setSuggestions(getDefaultSuggestions(isAuthenticated));
     const key = `chat_session_id:${identityKey}`;
     const existing = localStorage.getItem(key);
     if (existing) {
@@ -59,8 +80,8 @@ export default function ChatWidget() {
     setSessionId(next);
   }, [identityKey, isAuthenticated]);
 
-  const onSend = async () => {
-    const text = input.trim();
+  const onSend = async (overrideText) => {
+    const text = String(overrideText ?? input).trim();
     if (!text || loading) return;
 
     const nextMessages = [...messages, { role: "user", content: text }];
@@ -73,6 +94,9 @@ export default function ChatWidget() {
         history: nextMessages.slice(-10),
         session_id: sessionId,
       });
+      if (Array.isArray(data?.suggestions) && data.suggestions.length > 0) {
+        setSuggestions(data.suggestions.slice(0, 8));
+      }
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: data?.reply || "No response generated." },
@@ -96,7 +120,7 @@ export default function ChatWidget() {
   return (
     <div className="fixed bottom-5 right-5 z-50">
       {isOpen && (
-        <div className="mb-3 flex h-[460px] w-[350px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+           <div className="mb-3 flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl max-h-[80vh] w-[350px] max-w-[90vw]">
           <div className="flex items-center justify-between border-b border-slate-100 bg-slate-900 px-4 py-3 text-white">
             <div>
               <p className="text-sm font-bold">AUTO INVEST Chat</p>
@@ -108,6 +132,25 @@ export default function ChatWidget() {
             >
               Close
             </button>
+          </div>
+
+          <div className="border-b border-slate-100 bg-slate-50 px-3 py-3">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Suggested questions
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => onSend(suggestion)}
+                  disabled={loading}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-left text-[11px] font-medium leading-snug text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3">
