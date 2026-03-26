@@ -73,3 +73,26 @@ body {
     radial-gradient(700px 500px at 50% 105%, rgba(16, 185, 129, 0.12), transparent 62%),
     linear-gradient(180deg, #030712 0%, #0b1022 45%, #050816 100%);
 }
+
+.market-tape-mask {
+  mask-image: linear-gradient(to right, transparent 0, black 4%, black 96%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 4%, black 96%, transparent 100%);
+}
+
+.market-tape-track {
+  animation: market-tape-scroll 36s linear infinite;
+  will-change: transform;
+}
+
+.market-tape-mask:hover .market-tape-track {
+  animation-play-state: paused;
+}
+
+@keyframes market-tape-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}

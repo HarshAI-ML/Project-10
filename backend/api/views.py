@@ -54,7 +54,7 @@ from analytics.services.yahoo_search import (
     search_live_stocks,
 )
 from pipeline.models import SilverCleanedPrice
-from portfolio.models import Portfolio, PortfolioStock, Stock
+from portfolio.models import Portfolio, PortfolioStock, Stock, StockMaster
 from portfolio.services import create_default_portfolios_for_user, user_has_default_portfolios
 from api.chatbot_service import generate_chat_response
 
@@ -712,6 +712,50 @@ class StockViewSet(viewsets.ReadOnlyModelViewSet):
             )
         serializer = StockListSerializer(queryset, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="tape", permission_classes=[AllowAny])
+    def tape(self, request):
+        limit_param = request.query_params.get("limit", "16")
+        try:
+            limit = min(max(int(limit_param), 4), 40)
+        except ValueError:
+            limit = 16
+
+        latest_rows = list(
+            SilverCleanedPrice.objects
+            .filter(close__isnull=False)
+            .order_by("ticker", "-date")
+            .distinct("ticker")
+            .values("ticker", "close", "daily_return")
+        )
+        if not latest_rows:
+            return Response([])
+
+        tickers = [row["ticker"] for row in latest_rows if row.get("ticker")]
+        name_map = {
+            row["ticker"]: row["name"]
+            for row in StockMaster.objects.filter(ticker__in=tickers).values("ticker", "name")
+        }
+
+        payload = []
+        for latest in latest_rows:
+            ticker = latest.get("ticker")
+            if not ticker:
+                continue
+            daily_return = latest.get("daily_return")
+            change_pct = round(float(daily_return) * 100, 2) if daily_return is not None else None
+            payload.append(
+                {
+                    "symbol": ticker,
+                    "company_name": name_map.get(ticker) or ticker,
+                    "price": latest.get("close"),
+                    "change_pct": change_pct,
+                }
+            )
+            if len(payload) >= limit:
+                break
+
+        return Response(payload)
 
     @action(detail=False, methods=["get"], url_path="live-search")
     def live_search(self, request):

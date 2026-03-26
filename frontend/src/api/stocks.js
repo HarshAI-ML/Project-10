@@ -151,3 +151,20 @@ export const fetchGlobalClusters = async (nClusters = 3) => {
   });
   return data;
 };
+
+export const fetchPortfolioTape = async (portfolioId, limit = 12) => {
+  if (!portfolioId) return [];
+  const queryParams = new URLSearchParams({ limit: String(limit) });
+  const { data } = await api.get(`portfolio/${portfolioId}/tape/?${queryParams.toString()}`, {
+    timeout: 15000,
+  });
+  return Array.isArray(data) ? data : [];
+};
+
+export const fetchLandingTape = async (limit = 16) => {
+  const queryParams = new URLSearchParams({ limit: String(limit) });
+  const { data } = await api.get(`stocks/tape/?${queryParams.toString()}`, {
+    timeout: 15000,
+  });
+  return Array.isArray(data) ? data : [];
+};
