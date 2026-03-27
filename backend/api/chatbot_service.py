@@ -42,12 +42,12 @@ GENERIC_SUGGESTED_QUESTIONS = [
 ]
 
 PERSONALIZED_SUGGESTED_QUESTIONS = [
-    "Which stock in my portfolio has the highest expected upside?",
-    "Which holding has the best buy signal right now?",
-    "Which stock has the lowest P/E ratio in my portfolio?",
-    "What are the riskiest holdings in my current portfolio?",
-    "Show me the strongest stock by sentiment in my portfolio.",
-    "What is my portfolio missing for better balance?",
+    "Which of my stocks has a buy signal right now?",
+    "Are there any sell signals I should worry about in my portfolio?",
+    "Which holding looks the riskiest right now?",
+    "Is my portfolio well balanced or too concentrated?",
+    "Which stock in my portfolio looks undervalued by PE ratio?",
+    "Which of my stocks has the best price forecast?",
 ]
 
 
