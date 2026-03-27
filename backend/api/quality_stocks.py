@@ -71,6 +71,13 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
+def _to_billions(value: Any) -> Optional[float]:
+    numeric = _to_float(value)
+    if numeric is None:
+        return None
+    return round(numeric / 1_000_000_000, 4)
+
+
 def _normalize_signal(value: Any) -> str:
     text = str(value or "").strip().upper()
     if "BUY" in text:
@@ -215,9 +222,10 @@ def _build_graphs_data(symbol: str, fundamentals: Dict[str, Any], history_rows: 
         "price_history": _serialize_price_history(history_rows),
         "financial_metrics": [
             {
-                "metric": "Revenue",
-                "stock_value": _to_float(fundamentals.get("total_revenue")),
-                "sector_average": _to_float(sector_avg.get("revenue")),
+                "metric": "Revenue (B)",
+                "stock_value": _to_billions(fundamentals.get("total_revenue")),
+                "sector_average": _to_billions(sector_avg.get("revenue")),
+                "unit": "B",
             },
             {
                 "metric": "EPS",
@@ -237,6 +245,33 @@ def _build_graphs_data(symbol: str, fundamentals: Dict[str, Any], history_rows: 
         ],
         "generated_for": symbol,
     }
+
+
+def _normalize_graphs_data_units(graphs_data: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(graphs_data or {})
+    metrics = payload.get("financial_metrics")
+    if not isinstance(metrics, list):
+        return payload
+
+    normalized_metrics = []
+    for row in metrics:
+        if not isinstance(row, dict):
+            normalized_metrics.append(row)
+            continue
+
+        metric_name = str(row.get("metric") or "")
+        normalized_row = dict(row)
+        if metric_name.strip().lower() == "revenue":
+            stock_value = _to_float(row.get("stock_value"))
+            sector_value = _to_float(row.get("sector_average"))
+            normalized_row["metric"] = "Revenue (B)"
+            normalized_row["stock_value"] = _to_billions(stock_value)
+            normalized_row["sector_average"] = _to_billions(sector_value)
+            normalized_row["unit"] = "B"
+        normalized_metrics.append(normalized_row)
+
+    payload["financial_metrics"] = normalized_metrics
+    return payload
 
 
 def _deterministic_quality_report(stock_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -765,10 +800,11 @@ def get_quality_stock_detail(user, quality_stock_id: int) -> Optional[Dict[str, 
     }
 
     report_json = quality_stock.report_json or {}
+    normalized_graphs = _normalize_graphs_data_units(quality_stock.graphs_data or {})
     return {
         **list_row,
         "report_json": report_json,
-        "graphs_data": quality_stock.graphs_data or {},
+        "graphs_data": normalized_graphs,
         "key_financials": key_financials,
         "justification": report_json.get("justification"),
         "risks": list(report_json.get("risks") or []),

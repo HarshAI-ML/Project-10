@@ -3,6 +3,7 @@ import threading
 import logging
 from typing import Any, Dict, List, Optional, TypedDict
 import json
+from pathlib import Path
 
 import requests
 from django.db import connection
@@ -50,6 +51,40 @@ PERSONALIZED_SUGGESTED_QUESTIONS = [
     "Which of my stocks has the best price forecast?",
 ]
 
+PROMPT_CONFIG_PATH = Path(__file__).resolve().with_name("chatbot_prompt_versions.json")
+PROMPT_VERSION_OVERRIDE_ENV = "CHATBOT_PROMPT_VERSION"
+
+_DEFAULT_PROMPT_SET = {
+    "guest_system_prompt": (
+        "You are AUTO INVEST assistant for public users. "
+        "Give general, educational investing guidance. "
+        "Do not claim access to private account data. "
+        "Keep responses practical and concise. "
+        "Not financial advice."
+    ),
+    "auth_system_prompt": (
+        "You are AUTO INVEST personalized assistant for logged-in users. "
+        "The USER_CONTEXT is authoritative account data. "
+        "If USER_CONTEXT_JSON includes active_portfolio_id, treat the enclosed stocks as the current open portfolio scope. "
+        "For questions about holdings, rankings, risk, upside, sentiment, or valuation within the portfolio, answer only from that scoped portfolio context. "
+        "For general investing or market questions that do not ask about portfolio holdings, answer normally and do not force portfolio-specific data. "
+        "Answer using USER_CONTEXT first. "
+        "Never say you don't have data if USER_CONTEXT includes relevant fields. "
+        "If a metric is missing in USER_CONTEXT, say that clearly and suggest next available metric. "
+        "Do not invent holdings, prices, or ratios. "
+        "When user asks for best/highest/lowest/top, compute from USER_CONTEXT and show ticker + value + portfolio. "
+        "Keep responses concise and practical. Not financial advice."
+    ),
+    "fallback_auth_prompt": (
+        "You are AUTO INVEST personalized assistant. "
+        "If the context includes an active portfolio scope, use it for questions about holdings and portfolio comparisons. "
+        "For general market or educational questions, answer normally without inventing portfolio data. "
+        "Use this context as authoritative account data. "
+        "Compute rankings from it when asked."
+    ),
+    "fallback_guest_prompt": "You are AUTO INVEST public assistant. Give general investing guidance.",
+}
+
 
 class ChatState(TypedDict, total=False):
     message: str
@@ -68,11 +103,75 @@ _GRAPH_APP = None
 _GRAPH_APP_LOCK = threading.Lock()
 _EMBED_MODEL = None
 _EMBED_LOCK = threading.Lock()
+_PROMPT_CONFIG_CACHE: Dict[str, Any] = {}
+_PROMPT_CONFIG_MTIME: Optional[float] = None
+_PROMPT_CONFIG_LOCK = threading.Lock()
 
 
 class ChatProviderError(RuntimeError):
     """Raised when a chat provider cannot produce a usable response."""
 
+
+
+def _load_prompt_config() -> Dict[str, Any]:
+    global _PROMPT_CONFIG_CACHE, _PROMPT_CONFIG_MTIME
+
+    with _PROMPT_CONFIG_LOCK:
+        try:
+            mtime = PROMPT_CONFIG_PATH.stat().st_mtime
+        except OSError:
+            if not _PROMPT_CONFIG_CACHE:
+                logger.warning("Prompt config not found at %s; using defaults.", PROMPT_CONFIG_PATH)
+            _PROMPT_CONFIG_CACHE = {}
+            _PROMPT_CONFIG_MTIME = None
+            return {}
+
+        if _PROMPT_CONFIG_MTIME == mtime and _PROMPT_CONFIG_CACHE:
+            return _PROMPT_CONFIG_CACHE
+
+        try:
+            raw = PROMPT_CONFIG_PATH.read_text(encoding="utf-8")
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("Prompt config root must be a JSON object.")
+            _PROMPT_CONFIG_CACHE = parsed
+            _PROMPT_CONFIG_MTIME = mtime
+            return parsed
+        except Exception:
+            logger.exception("Failed to load prompt config from %s; using defaults.", PROMPT_CONFIG_PATH)
+            _PROMPT_CONFIG_CACHE = {}
+            _PROMPT_CONFIG_MTIME = mtime
+            return {}
+
+
+def _resolve_prompt_set() -> Dict[str, str]:
+    config = _load_prompt_config()
+    versions = config.get("versions")
+    if not isinstance(versions, dict):
+        return _DEFAULT_PROMPT_SET
+
+    preferred_version = os.getenv(PROMPT_VERSION_OVERRIDE_ENV, "").strip() or str(
+        config.get("default_version", "")
+    ).strip()
+
+    selected = versions.get(preferred_version) if preferred_version else None
+    if isinstance(selected, dict):
+        merged = dict(_DEFAULT_PROMPT_SET)
+        merged.update({k: str(v) for k, v in selected.items() if isinstance(v, str)})
+        return merged
+
+    for candidate in versions.values():
+        if isinstance(candidate, dict):
+            merged = dict(_DEFAULT_PROMPT_SET)
+            merged.update({k: str(v) for k, v in candidate.items() if isinstance(v, str)})
+            return merged
+
+    return _DEFAULT_PROMPT_SET
+
+
+def _get_system_prompt(prompt_key: str) -> str:
+    prompts = _resolve_prompt_set()
+    return str(prompts.get(prompt_key, _DEFAULT_PROMPT_SET[prompt_key])).strip()
 
 
 def _normalize_history(history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -916,13 +1015,7 @@ def _respond_guest_node(state: ChatState) -> ChatState:
     Returns:
         Dictionary with 'response' key containing the generated text
     """
-    system_prompt = (
-        "You are AUTO INVEST assistant for public users. "
-        "Give general, educational investing guidance. "
-        "Do not claim access to private account data. "
-        "Keep responses practical and concise. "
-        "Not financial advice."
-    )
+    system_prompt = _get_system_prompt("guest_system_prompt")
     vector_context = state.get("vector_context", "")
     if vector_context:
         system_prompt = f"{system_prompt}\n\n{vector_context}"
@@ -947,19 +1040,7 @@ def _respond_auth_node(state: ChatState) -> ChatState:
     user_context = state.get("user_context", "")
     vector_context = state.get("vector_context", "")
     wrapped_user_context = _wrap_user_context_for_prompt(user_context)
-    system_prompt = (
-        "You are AUTO INVEST personalized assistant for logged-in users. "
-        "The USER_CONTEXT is authoritative account data. "
-        "If USER_CONTEXT_JSON includes active_portfolio_id, treat the enclosed stocks as the current open portfolio scope. "
-        "For questions about holdings, rankings, risk, upside, sentiment, or valuation within the portfolio, answer only from that scoped portfolio context. "
-        "For general investing or market questions that do not ask about portfolio holdings, answer normally and do not force portfolio-specific data. "
-        "Answer using USER_CONTEXT first. "
-        "Never say you don't have data if USER_CONTEXT includes relevant fields. "
-        "If a metric is missing in USER_CONTEXT, say that clearly and suggest next available metric. "
-        "Do not invent holdings, prices, or ratios. "
-        "When user asks for best/highest/lowest/top, compute from USER_CONTEXT and show ticker + value + portfolio. "
-        "Keep responses concise and practical. Not financial advice."
-    )
+    system_prompt = _get_system_prompt("auth_system_prompt")
     if wrapped_user_context:
         system_prompt = f"{system_prompt}\n\n{wrapped_user_context}"
     if vector_context:
@@ -985,19 +1066,13 @@ def _run_fallback(state: ChatState) -> str:
         ctx = state.get("user_context", "")
         vector_ctx = state.get("vector_context", "")
         wrapped_ctx = _wrap_user_context_for_prompt(ctx)
-        prompt = (
-            "You are AUTO INVEST personalized assistant. "
-            "If the context includes an active portfolio scope, use it for questions about holdings and portfolio comparisons. "
-            "For general market or educational questions, answer normally without inventing portfolio data. "
-            "Use this context as authoritative account data. "
-            "Compute rankings from it when asked."
-        )
+        prompt = _get_system_prompt("fallback_auth_prompt")
         if wrapped_ctx:
             prompt = f"{prompt}\n\n{wrapped_ctx}"
         if vector_ctx:
             prompt = f"{prompt}\n\n{vector_ctx}"
     else:
-        prompt = "You are AUTO INVEST public assistant. Give general investing guidance."
+        prompt = _get_system_prompt("fallback_guest_prompt")
         vector_ctx = state.get("vector_context", "")
         if vector_ctx:
             prompt = f"{prompt}\n\n{vector_ctx}"
