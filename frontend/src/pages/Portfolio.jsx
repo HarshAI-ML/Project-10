@@ -1,7 +1,7 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Loader from "../components/Loader";
-import { createPortfolio, fetchPortfolio } from "../api/stocks";
+import { createPortfolio, fetchPortfolio, fetchQualityStocks } from "../api/stocks";
 
 const ACTIVE_PORTFOLIO_KEY = "active_portfolio_id";
 
@@ -30,7 +30,10 @@ export default function Portfolio() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [openingClusterId, setOpeningClusterId] = useState(null);
+  const [openingQualityId, setOpeningQualityId] = useState(null);
+  const [qualityReportCounts, setQualityReportCounts] = useState({});
   const navigate = useNavigate();
+  const qualityCountByPortfolio = useMemo(() => qualityReportCounts || {}, [qualityReportCounts]);
 
   useEffect(() => {
     const notice = searchParams.get("notice");
@@ -45,8 +48,18 @@ export default function Portfolio() {
       setLoading(true);
       setError("");
       try {
-        const data = await fetchPortfolio();
-        setPortfolios(Array.isArray(data) ? data : []);
+        const [portfolioData, qualityRows] = await Promise.all([
+          fetchPortfolio(),
+          fetchQualityStocks(),
+        ]);
+        setPortfolios(Array.isArray(portfolioData) ? portfolioData : []);
+        const counts = {};
+        for (const row of Array.isArray(qualityRows) ? qualityRows : []) {
+          const pid = row?.portfolio_id;
+          if (pid === null || pid === undefined) continue;
+          counts[pid] = (counts[pid] || 0) + 1;
+        }
+        setQualityReportCounts(counts);
       } catch {
         setError("Unable to load portfolios.");
       } finally {
@@ -70,6 +83,7 @@ export default function Portfolio() {
       });
       sessionStorage.setItem(ACTIVE_PORTFOLIO_KEY, String(created.id));
       setPortfolios((p) => [...p, created]);
+      setQualityReportCounts((prev) => ({ ...prev, [created.id]: 0 }));
       setForm({ name: "", description: "", geography: "ALL" });
       setMessage("Portfolio created successfully.");
     } catch (err) {
@@ -192,6 +206,9 @@ export default function Portfolio() {
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
                       [{portfolio.geography || "ALL"}]
                     </span>
+                    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700 ring-1 ring-violet-200">
+                      QS: {qualityCountByPortfolio[portfolio.id] || 0}
+                    </span>
                   </div>
                   <p className="mt-0.5 text-xs text-slate-400 line-clamp-2">
                     {portfolio.description || "No description provided"}
@@ -231,6 +248,19 @@ export default function Portfolio() {
                 </span>
                 <button
                   type="button"
+                  className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:opacity-50"
+                  disabled={openingQualityId === portfolio.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpeningQualityId(portfolio.id);
+                    sessionStorage.setItem(ACTIVE_PORTFOLIO_KEY, String(portfolio.id));
+                    navigate(`/quality-stocks?portfolio=${portfolio.id}`);
+                  }}
+                >
+                  {openingQualityId === portfolio.id ? "…" : `Quality (${qualityCountByPortfolio[portfolio.id] || 0})`}
+                </button>
+                <button
+                  type="button"
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-50"
                   disabled={openingClusterId === portfolio.id}
                   onClick={(e) => {
@@ -250,3 +280,4 @@ export default function Portfolio() {
     </section>
   );
 }
+

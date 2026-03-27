@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Loader from "../components/Loader";
 import StockTable from "../components/StockTable";
 import {
@@ -11,11 +11,12 @@ import {
 
 export default function QualityStocks() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
   const [portfolios, setPortfolios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [portfolioFilter, setPortfolioFilter] = useState("all");
+  const [portfolioFilter, setPortfolioFilter] = useState(searchParams.get("portfolio") || "all");
   const [signalFilter, setSignalFilter] = useState("all");
   const [rerunningId, setRerunningId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -44,6 +45,13 @@ export default function QualityStocks() {
   useEffect(() => {
     loadRows(portfolioFilter, signalFilter);
   }, [portfolioFilter, signalFilter]);
+
+  useEffect(() => {
+    const selectedPortfolio = searchParams.get("portfolio") || "all";
+    if (selectedPortfolio !== portfolioFilter) {
+      setPortfolioFilter(selectedPortfolio);
+    }
+  }, [searchParams, portfolioFilter]);
 
   const stats = useMemo(() => {
     const avgRating =
@@ -113,7 +121,15 @@ export default function QualityStocks() {
             <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Portfolio</span>
             <select
               value={portfolioFilter}
-              onChange={(event) => setPortfolioFilter(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setPortfolioFilter(next);
+                if (next === "all") {
+                  setSearchParams({}, { replace: true });
+                } else {
+                  setSearchParams({ portfolio: next }, { replace: true });
+                }
+              }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none"
             >
               <option value="all">All</option>
